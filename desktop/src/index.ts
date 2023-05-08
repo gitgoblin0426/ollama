@@ -1,4 +1,4 @@
-import { app, BrowserWindow, autoUpdater } from 'electron'
+import { app, BrowserWindow, autoUpdater, dialog } from 'electron'
 import { spawn } from 'child_process'
 import * as path from 'path'
 
@@ -83,3 +83,21 @@ app.on('activate', () => {
 // In this file you can include the rest of your app's specific main process
 // code. You can also put them in separate files and import them here.
 autoUpdater.setFeedURL({ url: `https://updates.ollama.ai/update/${process.platform}/${app.getVersion()}` })
+
+setInterval(() => {
+  autoUpdater.checkForUpdates()
+}, 60000)
+
+autoUpdater.on('update-downloaded', (event, releaseNotes, releaseName) => {
+  dialog
+    .showMessageBox({
+      type: 'info',
+      buttons: ['Restart Now', 'Later'],
+      title: 'New update available',
+      message: process.platform === 'win32' ? releaseNotes : releaseName,
+      detail: 'A new version of Ollama is available. Restart to apply the update.',
+    })
+    .then(returnValue => {
+      if (returnValue.response === 0) autoUpdater.quitAndInstall()
+    })
+})
