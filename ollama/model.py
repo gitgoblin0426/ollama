@@ -38,7 +38,7 @@ def pull(remote, models_home=".", *args, **kwargs):
         )
     )
 
-    print(f"Pulling {parts.netloc}/{model}...")
+    print(f"Fetching model from {new_url}")
 
     response = requests.get(new_url)
     response.raise_for_status()  # Raises stored HTTPError, if one occurred
@@ -81,8 +81,6 @@ def pull(remote, models_home=".", *args, **kwargs):
         unit_scale=True,
         unit_divisor=1024,
         initial=first_byte,
-        ascii=" ==",
-        bar_format="Downloading [{bar}] {percentage:3.2f}% {rate_fmt}{postfix}",
     ) as bar:
         for data in response.iter_content(chunk_size=1024):
             size = file.write(data)
