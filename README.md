@@ -20,12 +20,21 @@ Run ai models locally.
 pip install ollama
 ```
 
+## Install From Source
+
+```
+git clone git@github.com:jmorganca/ollama ollama
+cd ollama
+pip install -r requirements.txt
+pip install -e .
+```
+
 ## Quickstart
 
 ```
 % ollama run huggingface.co/TheBloke/orca_mini_3B-GGML
 Pulling huggingface.co/TheBloke/orca_mini_3B-GGML...
-Downloading [================>          ] 66.67% (2/3) 30.2MB/s
+Downloading [================           ] 66.67% 11.8MiB/s
 
 ...
 ...
