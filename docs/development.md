@@ -1,33 +1,48 @@
 # Development
 
-ollama is built using Python 3 and uses [Poetry](https://python-poetry.org/) to manage dependencies and build packages.
+ollama is built and run using [Poetry](https://python-poetry.org/).
+
+## Running
+
+**Start backend service:**
+
+Install dependencies:
 
 ```
-pip install poetry
+poetry install --extras server
 ```
 
-Install ollama and its dependencies:
+Run a server:
 
 ```
-poetry install --extras server --with dev
+poetry run ollama serve
 ```
 
-Run ollama server:
+## Building
 
-```
-poetry run ollama server
-```
+If using Apple silicon, you need a Python version that supports arm64:
 
-Update dependencies:
-
-```
-poetry update --extras server --with dev
-poetry lock
-poetry export >requirements.txt
+```bash
+wget https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-MacOSX-arm64.sh
+bash Miniforge3-MacOSX-arm64.sh
 ```
 
-Build binary package:
+Get the dependencies:
 
+```bash
+poetry install --extras server
 ```
+
+Then build a binary for your current platform:
+
+```bash
 poetry build
+```
+
+## Update requirements.txt
+
+In the root directory, run:
+
+```
+pipreqs . --force
 ```
