@@ -45,7 +45,7 @@ def load(model, models_home=".", llms={}):
 
         if not model_path:
             # try loading this as a path to a model, rather than a model name
-            model_path = os.path.abspath(model)
+            model_path = model
 
         # suppress LLM's output
         with suppress_stderr():
