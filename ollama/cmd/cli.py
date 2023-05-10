@@ -29,18 +29,14 @@ def main():
     generate_parser.add_argument("prompt", nargs="?")
     generate_parser.set_defaults(fn=generate)
 
-    add_parser = subparsers.add_parser("add")
-    add_parser.add_argument("model")
-    add_parser.set_defaults(fn=add)
-
     pull_parser = subparsers.add_parser("pull")
     pull_parser.add_argument("model")
     pull_parser.set_defaults(fn=pull)
 
-    pull_parser = subparsers.add_parser("run")
-    pull_parser.add_argument("model")
-    pull_parser.add_argument("prompt", nargs="?")
-    pull_parser.set_defaults(fn=run)
+    run_parser = subparsers.add_parser("run")
+    run_parser.add_argument("model")
+    run_parser.add_argument("prompt", nargs="?")
+    run_parser.set_defaults(fn=run)
 
     args = parser.parse_args()
     args = vars(args)
@@ -113,10 +109,6 @@ def generate_batch(*args, **kwargs):
         print(">>> ", line, end="", flush=True)
         kwargs.update({"prompt": line})
         generate_oneshot(*args, **kwargs)
-
-
-def add(model, models_home):
-    os.rename(model, Path(models_home) / Path(model).name)
 
 
 def pull(*args, **kwargs):
