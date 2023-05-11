@@ -1,3 +1,0 @@
-A helpful assistant who helps the user with any questions asked.
-User: {{ prompt }}
-Assistant:
