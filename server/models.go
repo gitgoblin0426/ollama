@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"path"
@@ -29,15 +30,6 @@ type Model struct {
 	License          string `json:"license"`
 }
 
-func (m *Model) FullName() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		panic(err)
-	}
-
-	return path.Join(home, ".ollama", "models", m.Name+".bin")
-}
-
 func pull(model string, progressCh chan<- api.PullProgress) error {
 	remote, err := getRemote(model)
 	if err != nil {
@@ -53,7 +45,7 @@ func getRemote(model string) (*Model, error) {
 		return nil, fmt.Errorf("failed to get directory: %w", err)
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read directory: %w", err)
 	}
@@ -72,6 +64,13 @@ func getRemote(model string) (*Model, error) {
 
 func saveModel(model *Model, progressCh chan<- api.PullProgress) error {
 	// this models cache directory is created by the server on startup
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %w", err)
+	}
+	modelsCache := path.Join(home, ".ollama", "models")
+
+	fileName := path.Join(modelsCache, model.Name+".bin")
 
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", model.URL, nil)
@@ -79,16 +78,16 @@ func saveModel(model *Model, progressCh chan<- api.PullProgress) error {
 		return fmt.Errorf("failed to download model: %w", err)
 	}
 	// check for resume
-	alreadyDownloaded := int64(0)
-	fileInfo, err := os.Stat(model.FullName())
+	alreadyDownloaded := 0
+	fileInfo, err := os.Stat(fileName)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			return fmt.Errorf("failed to check resume model file: %w", err)
 		}
 		// file doesn't exist, create it now
 	} else {
-		alreadyDownloaded = fileInfo.Size()
-		req.Header.Add("Range", fmt.Sprintf("bytes=%d-", alreadyDownloaded))
+		alreadyDownloaded = int(fileInfo.Size())
+		req.Header.Add("Range", "bytes="+strconv.Itoa(alreadyDownloaded)+"-")
 	}
 
 	resp, err := client.Do(req)
@@ -112,13 +111,13 @@ func saveModel(model *Model, progressCh chan<- api.PullProgress) error {
 		return fmt.Errorf("failed to download model: %s", resp.Status)
 	}
 
-	out, err := os.OpenFile(model.FullName(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	out, err := os.OpenFile(fileName, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		panic(err)
 	}
 	defer out.Close()
 
-	totalSize, _ := strconv.ParseInt(resp.Header.Get("Content-Length"), 10, 64)
+	totalSize, _ := strconv.Atoi(resp.Header.Get("Content-Length"))
 
 	buf := make([]byte, 1024)
 	totalBytes := alreadyDownloaded
@@ -135,8 +134,7 @@ func saveModel(model *Model, progressCh chan<- api.PullProgress) error {
 		if _, err := out.Write(buf[:n]); err != nil {
 			return err
 		}
-
-		totalBytes += int64(n)
+		totalBytes += n
 
 		// send progress updates
 		progressCh <- api.PullProgress{
