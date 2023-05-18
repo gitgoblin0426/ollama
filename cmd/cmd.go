@@ -64,10 +64,8 @@ func pull(model string) error {
 }
 
 func RunGenerate(_ *cobra.Command, args []string) error {
-	// join all args into a single prompt
-	prompt := strings.Join(args[1:], " ")
 	if len(args) > 1 {
-		return generate(args[0], prompt)
+		return generateOneshot(args[0], args[1:]...)
 	}
 
 	if term.IsTerminal(int(os.Stdin.Fd())) {
@@ -111,6 +109,17 @@ func generate(model, prompt string) error {
 
 		fmt.Println()
 		fmt.Println()
+	}
+
+	return nil
+}
+
+func generateOneshot(model string, prompts ...string) error {
+	for _, prompt := range prompts {
+		fmt.Printf(">>> %s\n", prompt)
+		if err := generate(model, prompt); err != nil {
+			return err
+		}
 	}
 
 	return nil

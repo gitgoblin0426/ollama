@@ -16,7 +16,7 @@ Run large language models with `llama.cpp`.
 
 ## Install
 
-- [Download](https://github.com/jmorganca/ollama/releases/latest) for macOS
+- [Download](https://ollama.ai/download) for macOS
 - Download for Windows (coming soon)
 - Docker: `docker run -p 11434:11434 ollama/ollama`
 
@@ -46,14 +46,6 @@ Ask questions. Get answers.
 
 ```
 ollama run orca "Write an email to my boss."
-```
-
-### 🔎 Ask questions about documents
-
-Send the contents of a document and ask questions about it.
-
-```
-ollama run nous-hermes "$(cat input.txt)", please summarize this story
 ```
 
 ### 📖 Storytelling
