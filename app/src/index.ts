@@ -1,8 +1,6 @@
 import { spawn, exec } from 'child_process'
 import { app, autoUpdater, dialog, Tray, Menu } from 'electron'
 import Store from 'electron-store'
-import winston from 'winston'
-import 'winston-daily-rotate-file'
 import * as path from 'path'
 import * as fs from 'fs'
 
@@ -12,20 +10,6 @@ require('@electron/remote/main').initialize()
 
 const store = new Store()
 let tray: Tray | null = null
-
-const logFile = new winston.transports.File({
-  filename: path.join(app.getPath('home'), '.ollama', 'logs', 'server.log'),
-  maxsize: 1024 * 1024 * 20,
-  maxFiles: 5,
-});
-
-const logger = winston.createLogger({ 
-  transports: [logFile],
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.printf(info => `${info.timestamp} ${info.level}: ${info.message}`)
-  )
-})
 
 const SingleInstanceLock = app.requestSingleInstanceLock()
 if (!SingleInstanceLock) {
@@ -59,21 +43,22 @@ function server() {
   ? path.join(process.resourcesPath, 'ollama')
   : path.resolve(process.cwd(), '..', 'ollama')
 
+  console.log(`Starting server`)
   const proc = spawn(binary, ['serve'])
   proc.stdout.on('data', data => {
-    logger.info(`server: ${data.toString()}`)
+    console.log(`server: ${data}`)
   })
   proc.stderr.on('data', data => {
-    logger.error(`server: ${data.toString()}`)
+    console.error(`server: ${data}`)
   })
 
   proc.on('exit', () => {
-    logger.info('Restarting the server...');
+    console.log('Restarting...');
     server();
   })
 
   proc.on('disconnect', () => {
-    logger.info('Server disconnected. Reconnecting...');
+    console.log('Restarting...');
     server();
   })
 
@@ -104,12 +89,11 @@ function installCLI() {
     `
         exec(`osascript -e '${command}'`, (error: Error | null, stdout: string, stderr: string) => {
           if (error) {
-            logger.error(`CLI: Failed to install CLI - ${error.message}`)
+            console.error(`exec error: ${error}`)
             return
           }
-
-          logger.info(`CLI: ${stdout}}`)
-          logger.error(`CLI: ${stderr}`)
+          console.log(`stdout: ${stdout}`)
+          console.error(`stderr: ${stderr}`)
         })
       }
     })
@@ -155,7 +139,8 @@ app.on('ready', () => {
             })
             return
           } catch (e) {
-            logger.error(`[Move to Applications] Failed to move to applications folder - ${e.message}}`)
+            console.error('Failed to move to applications folder')
+            console.error(e)
           }
         }
       }
@@ -165,6 +150,7 @@ app.on('ready', () => {
   }
 
   createSystemtray()
+
   server()
 })
 
@@ -203,7 +189,7 @@ if (app.isPackaged) {
 }
 
 autoUpdater.on('error', e => {
-  logger.error(`auto updater: update check failed - ${e.message}`)
+  console.error('update check failed', e)
 })
 
 autoUpdater.on('update-downloaded', (event, releaseNotes, releaseName) => {
