@@ -16,7 +16,7 @@ Run large language models with `llama.cpp`.
 
 ## Install
 
-- [Download](https://ollama.ai/download) for macOS
+- Download for macOS
 - Download for Windows (coming soon)
 - Docker: `docker run -p 11434:11434 ollama/ollama`
 
@@ -24,10 +24,10 @@ You can also build the [binary from source](#building).
 
 ## Quickstart
 
-Run a fast and simple model.
+Run the model that started it all.
 
 ```
-ollama run orca
+ollama run llama
 ```
 
 ## Example models

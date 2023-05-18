@@ -1,25 +1,22 @@
-import { AiFillApple } from 'react-icons/ai'
-
 import models from '../../models.json'
 
 export default async function Home() {
   return (
     <main className='flex min-h-screen max-w-2xl flex-col p-4 lg:p-24'>
-      <img src='/ollama.png' className='w-20 h-auto' />
-      <section className='my-4'>
-        <p className='my-3 max-w-md'>
+      <h1 className='font-serif text-3xl'>ollama</h1>
+      <section className='my-8'>
+        <p className='my-3 mb-8 max-w-md'>
           <a className='underline' href='https://github.com/jmorganca/ollama'>
             Ollama
           </a>{' '}
-          is a tool for running large language models, currently for macOS with Windows and Linux coming soon.
+          is a tool for running large language models.
           <br />
           <br />
-          <a href='/download' target='_blank'>
-            <button className='bg-black text-white text-sm py-2 px-3 rounded-lg flex items-center gap-2'>
-              <AiFillApple className='h-auto w-5 relative -top-px' /> Download for macOS
-            </button>
-          </a>
+          Get started with Ollama using pip:
         </p>
+        <pre className='my-4'>
+          <code>pip install ollama</code>
+        </pre>
       </section>
       <section className='my-4'>
         <h2 className='mb-4 text-lg'>Example models you can try running:</h2>
