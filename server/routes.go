@@ -3,14 +3,12 @@ package server
 import (
 	"embed"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log"
 	"math"
 	"net"
 	"net/http"
-	"os"
 	"path"
 	"runtime"
 	"strings"
@@ -27,15 +25,6 @@ import (
 var templatesFS embed.FS
 var templates = template.Must(template.ParseFS(templatesFS, "templates/*.prompt"))
 
-func cacheDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		panic(err)
-	}
-
-	return path.Join(home, ".ollama")
-}
-
 func generate(c *gin.Context) {
 	var req api.GenerateRequest
 	req.ModelOptions = api.DefaultModelOptions
@@ -45,25 +34,12 @@ func generate(c *gin.Context) {
 		return
 	}
 
-	remoteModel, err := getRemote(req.Model)
-	if err != nil {
-		// couldn't check the directory, proceed in offline mode
-		_, err := os.Stat(req.Model)
-		if err != nil {
-			if !os.IsNotExist(err) {
-				c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
-				return
-			}
-			// couldn't find the model file, try setting the model to the cache directory
-			req.Model = path.Join(cacheDir(), "models", req.Model+".bin")
-		}
-	}
-	if remoteModel != nil {
+	if remoteModel, _ := getRemote(req.Model); remoteModel != nil {
 		req.Model = remoteModel.FullName()
 	}
 
 	modelOpts := getModelOpts(req)
-	modelOpts.NGPULayers = 1 // hard-code this for now
+	modelOpts.NGPULayers = 1  // hard-code this for now
 
 	model, err := llama.New(req.Model, modelOpts)
 	if err != nil {
@@ -142,17 +118,6 @@ func Serve(ln net.Listener) error {
 		go func() {
 			defer close(progressCh)
 			if err := pull(req.Model, progressCh); err != nil {
-				var opError *net.OpError
-				if errors.As(err, &opError) {
-					result := api.PullProgress{
-						Error: api.Error{
-							Code:    http.StatusBadGateway,
-							Message: "failed to get models from directory",
-						},
-					}
-					c.JSON(http.StatusBadGateway, result)
-					return
-				}
 				c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
 				return
 			}
