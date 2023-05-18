@@ -42,7 +42,9 @@ type LLama struct {
 	contextSize int
 }
 
-func New(model string, mo ModelOptions) (*LLama, error) {
+func New(model string, opts ...ModelOption) (*LLama, error) {
+	mo := NewModelOptions(opts...)
+
 	modelPath := C.CString(model)
 	defer C.free(unsafe.Pointer(modelPath))
 
@@ -106,7 +108,9 @@ func (l *LLama) Eval(text string, opts ...PredictOption) error {
 	return nil
 }
 
-func (l *LLama) Predict(text string, po PredictOptions) (string, error) {
+func (l *LLama) Predict(text string, opts ...PredictOption) (string, error) {
+	po := NewPredictOptions(opts...)
+
 	if po.TokenCallback != nil {
 		setCallback(l.ctx, po.TokenCallback)
 	}
