@@ -4,6 +4,7 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"math"
@@ -45,7 +46,7 @@ func generate(c *gin.Context) {
 		req.PredictOptions = &api.DefaultPredictOptions
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
 		return
 	}
 
@@ -65,7 +66,7 @@ func generate(c *gin.Context) {
 
 	model, err := llama.New(req.Model, modelOpts)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		fmt.Println("Loading the model failed:", err.Error())
 		return
 	}
 	defer model.Free()
@@ -79,7 +80,7 @@ func generate(c *gin.Context) {
 	if template := templates.Lookup(match); template != nil {
 		var sb strings.Builder
 		if err := template.Execute(&sb, req); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			fmt.Println("Prompt template failed:", err.Error())
 			return
 		}
 

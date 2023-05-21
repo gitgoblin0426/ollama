@@ -15,7 +15,6 @@ func (e Error) Error() string {
 	if e.Message == "" {
 		return fmt.Sprintf("%d %v", e.Code, strings.ToLower(http.StatusText(int(e.Code))))
 	}
-
 	return e.Message
 }
 

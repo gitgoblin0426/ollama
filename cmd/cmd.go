@@ -100,19 +100,14 @@ func generate(model, prompt string) error {
 			}
 		}()
 
-		request := api.GenerateRequest{Model: model, Prompt: prompt}
-		fn := func(resp api.GenerateResponse) error {
+		client.Generate(context.Background(), &api.GenerateRequest{Model: model, Prompt: prompt}, func(resp api.GenerateResponse) error {
 			if !spinner.IsFinished() {
 				spinner.Finish()
 			}
 
 			fmt.Print(resp.Response)
 			return nil
-		}
-
-		if err := client.Generate(context.Background(), &request, fn); err != nil {
-			return err
-		}
+		})
 
 		fmt.Println()
 		fmt.Println()
