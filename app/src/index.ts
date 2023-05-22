@@ -13,16 +13,18 @@ require('@electron/remote/main').initialize()
 const store = new Store()
 let tray: Tray | null = null
 
-const logger = winston.createLogger({
-  transports: [
-    new winston.transports.Console(),
-    new winston.transports.File({
-      filename: path.join(app.getPath('home'), '.ollama', 'logs', 'server.log'),
-      maxsize: 1024 * 1024 * 20,
-      maxFiles: 5,
-    }),
-  ],
-  format: winston.format.printf(info => `${info.message}`),
+const logFile = new winston.transports.File({
+  filename: path.join(app.getPath('home'), '.ollama', 'logs', 'server.log'),
+  maxsize: 1024 * 1024 * 20,
+  maxFiles: 5,
+});
+
+const logger = winston.createLogger({ 
+  transports: [logFile],
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.printf(info => `${info.timestamp} ${info.level}: ${info.message}`)
+  )
 })
 
 const SingleInstanceLock = app.requestSingleInstanceLock()
@@ -45,6 +47,7 @@ const createSystemtray = () => {
   tray.setToolTip('Ollama')
 }
 
+// Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require('electron-squirrel-startup')) {
   app.quit()
 }
@@ -53,33 +56,32 @@ const ollama = path.join(process.resourcesPath, 'ollama')
 
 function server() {
   const binary = app.isPackaged
-    ? path.join(process.resourcesPath, 'ollama')
-    : path.resolve(process.cwd(), '..', 'ollama')
+  ? path.join(process.resourcesPath, 'ollama')
+  : path.resolve(process.cwd(), '..', 'ollama')
 
   const proc = spawn(binary, ['serve'])
-
   proc.stdout.on('data', data => {
-    logger.info(data.toString().trim())
+    logger.info(`server: ${data.toString()}`)
   })
-
   proc.stderr.on('data', data => {
-    logger.error(data.toString().trim())
+    logger.error(`server: ${data.toString()}`)
   })
 
   proc.on('exit', () => {
-    logger.info('Restarting the server...')
-    server()
+    logger.info('Restarting the server...');
+    server();
   })
 
   proc.on('disconnect', () => {
-    logger.info('Server disconnected. Reconnecting...')
-    server()
+    logger.info('Server disconnected. Reconnecting...');
+    server();
   })
 
   process.on('exit', () => {
     proc.kill()
   })
 }
+
 
 function installCLI() {
   const symlinkPath = '/usr/local/bin/ollama'
@@ -102,12 +104,12 @@ function installCLI() {
     `
         exec(`osascript -e '${command}'`, (error: Error | null, stdout: string, stderr: string) => {
           if (error) {
-            logger.error(`cli: failed to install cli: ${error.message}`)
+            logger.error(`CLI: Failed to install CLI - ${error.message}`)
             return
           }
 
-          logger.info(stdout)
-          logger.error(stderr)
+          logger.info(`CLI: ${stdout}}`)
+          logger.error(`CLI: ${stderr}`)
         })
       }
     })
@@ -201,7 +203,7 @@ if (app.isPackaged) {
 }
 
 autoUpdater.on('error', e => {
-  logger.error(`update check failed - ${e.message}`)
+  logger.error(`auto updater: update check failed - ${e.message}`)
 })
 
 autoUpdater.on('update-downloaded', (event, releaseNotes, releaseName) => {
