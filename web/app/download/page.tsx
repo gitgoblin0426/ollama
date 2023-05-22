@@ -1,4 +1,7 @@
+import { Octokit } from '@octokit/rest'
 import { redirect } from 'next/navigation'
+
+const octokit = new Octokit()
 
 export default async function Download() {
   const res = await fetch('https://api.github.com/repos/jmorganca/ollama/releases', { next: { revalidate: 60 } })
