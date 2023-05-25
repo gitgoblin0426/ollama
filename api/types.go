@@ -18,9 +18,8 @@ type PullProgress struct {
 }
 
 type GenerateRequest struct {
-	Model   string `json:"model"`
-	Prompt  string `json:"prompt"`
-	Context []int  `json:"context,omitempty"`
+	Model  string `json:"model"`
+	Prompt string `json:"prompt"`
 
 	Options `json:"options"`
 }
@@ -30,8 +29,7 @@ type GenerateResponse struct {
 	CreatedAt time.Time `json:"created_at"`
 	Response  string    `json:"response,omitempty"`
 
-	Done    bool  `json:"done"`
-	Context []int `json:"context,omitempty"`
+	Done bool `json:"done"`
 
 	TotalDuration      time.Duration `json:"total_duration,omitempty"`
 	PromptEvalCount    int           `json:"prompt_eval_count,omitempty"`
@@ -59,7 +57,7 @@ func (r *GenerateResponse) Summary() {
 	}
 
 	if r.EvalDuration > 0 {
-		fmt.Fprintf(os.Stderr, "eval duraiton:        %s\n", r.EvalDuration)
+		fmt.Fprintf(os.Stderr, "eval duration:        %s\n", r.EvalDuration)
 		fmt.Fprintf(os.Stderr, "eval rate:            %.2f tokens/s\n", float64(r.EvalCount)/r.EvalDuration.Seconds())
 	}
 }
@@ -106,7 +104,7 @@ func DefaultOptions() Options {
 
 		UseNUMA: false,
 
-		NumCtx:   2048,
+		NumCtx:   512,
 		NumBatch: 512,
 		NumGPU:   1,
 		LowVRAM:  false,

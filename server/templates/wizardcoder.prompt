@@ -1,6 +1,4 @@
-{{- if not .Context }}
 Below is an instruction that describes a task. Write a response that appropriately completes the request
-{{- end }}
 
 ### Instruction: {{ .Prompt }}
 
