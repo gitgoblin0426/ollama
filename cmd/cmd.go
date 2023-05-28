@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,30 +21,27 @@ import (
 	"github.com/jmorganca/ollama/server"
 )
 
+func cacheDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		panic(err)
+	}
+
+	return filepath.Join(home, ".ollama")
+}
+
 func create(cmd *cobra.Command, args []string) error {
 	filename, _ := cmd.Flags().GetString("file")
 	client := api.NewClient()
 
-	var spinner *Spinner
-
 	request := api.CreateRequest{Name: args[0], Path: filename}
 	fn := func(resp api.CreateProgress) error {
-		if spinner != nil {
-			spinner.Stop()
-		}
-
-		spinner = NewSpinner(resp.Status)
-		go spinner.Spin(100 * time.Millisecond)
-
+		fmt.Println(resp.Status)
 		return nil
 	}
 
 	if err := client.Create(context.Background(), &request, fn); err != nil {
 		return err
-	}
-
-	if spinner != nil {
-		spinner.Stop()
 	}
 
 	return nil
@@ -141,8 +139,24 @@ func generate(cmd *cobra.Command, model, prompt string) error {
 	if len(strings.TrimSpace(prompt)) > 0 {
 		client := api.NewClient()
 
-		spinner := NewSpinner("")
-		go spinner.Spin(60 * time.Millisecond)
+		spinner := progressbar.NewOptions(-1,
+			progressbar.OptionSetWriter(os.Stderr),
+			progressbar.OptionThrottle(60*time.Millisecond),
+			progressbar.OptionSpinnerType(14),
+			progressbar.OptionSetRenderBlankState(true),
+			progressbar.OptionSetElapsedTime(false),
+			progressbar.OptionClearOnFinish(),
+		)
+
+		go func() {
+			for range time.Tick(60 * time.Millisecond) {
+				if spinner.IsFinished() {
+					break
+				}
+
+				spinner.Add(1)
+			}
+		}()
 
 		var latest api.GenerateResponse
 
@@ -240,6 +254,10 @@ func NewCLI() *cobra.Command {
 		SilenceUsage: true,
 		CompletionOptions: cobra.CompletionOptions{
 			DisableDefaultCmd: true,
+		},
+		PersistentPreRunE: func(_ *cobra.Command, args []string) error {
+			// create the models directory and it's parent
+			return os.MkdirAll(filepath.Join(cacheDir(), "models"), 0o700)
 		},
 	}
 
