@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -12,7 +13,6 @@ import (
 	"text/template"
 	"time"
 
-	"dario.cat/mergo"
 	"github.com/gin-gonic/gin"
 
 	"github.com/jmorganca/ollama/api"
@@ -31,7 +31,11 @@ func cacheDir() string {
 func generate(c *gin.Context) {
 	start := time.Now()
 
-	var req api.GenerateRequest
+	req := api.GenerateRequest{
+		Options: api.DefaultOptions(),
+		Prompt:  "",
+	}
+
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -40,17 +44,6 @@ func generate(c *gin.Context) {
 	model, err := GetModel(req.Model)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	opts := api.DefaultOptions()
-	if err := mergo.Merge(&opts, model.Options, mergo.WithOverride); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	if err := mergo.Merge(&opts, req.Options, mergo.WithOverride); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -67,9 +60,9 @@ func generate(c *gin.Context) {
 	}
 	req.Prompt = sb.String()
 
-	log.Printf("prompt: \n%s", req.Prompt)
+	fmt.Printf("prompt = >>>%s<<<\n", req.Prompt)
 
-	llm, err := llama.New(model.ModelPath, opts)
+	llm, err := llama.New(model.ModelPath, req.Options)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
