@@ -195,8 +195,7 @@ func list(c *gin.Context) {
 		if !info.IsDir() {
 			fi, err := os.Stat(path)
 			if err != nil {
-				log.Printf("skipping file: %s", fp)
-				return nil
+				return err
 			}
 			path := path[len(fp)+1:]
 			slashIndex := strings.LastIndex(path, "/")
