@@ -3,7 +3,6 @@ package server
 import (
 	"bytes"
 	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,10 +41,9 @@ type Layer struct {
 	Size      int    `json:"size"`
 }
 
-type LayerWithBuffer struct {
+type LayerReader struct {
 	Layer
-
-	Buffer *bytes.Buffer
+	io.Reader
 }
 
 type ConfigV2 struct {
@@ -161,7 +159,7 @@ func CreateModel(name string, mf io.Reader, fn func(status string)) error {
 		return err
 	}
 
-	var layers []*LayerWithBuffer
+	var layers []*LayerReader
 	params := make(map[string]string)
 
 	for _, c := range commands {
@@ -274,7 +272,7 @@ func CreateModel(name string, mf io.Reader, fn func(status string)) error {
 	return nil
 }
 
-func removeLayerFromLayers(layers []*LayerWithBuffer, mediaType string) []*LayerWithBuffer {
+func removeLayerFromLayers(layers []*LayerReader, mediaType string) []*LayerReader {
 	j := 0
 	for _, l := range layers {
 		if l.MediaType != mediaType {
@@ -285,7 +283,7 @@ func removeLayerFromLayers(layers []*LayerWithBuffer, mediaType string) []*Layer
 	return layers[:j]
 }
 
-func SaveLayers(layers []*LayerWithBuffer, fn func(status string), force bool) error {
+func SaveLayers(layers []*LayerReader, fn func(status string), force bool) error {
 	// Write each of the layers to disk
 	for _, layer := range layers {
 		fp, err := GetBlobsPath(layer.Digest)
@@ -303,10 +301,10 @@ func SaveLayers(layers []*LayerWithBuffer, fn func(status string), force bool) e
 			}
 			defer out.Close()
 
-			_, err = io.Copy(out, layer.Buffer)
-			if err != nil {
+			if _, err = io.Copy(out, layer.Reader); err != nil {
 				return err
 			}
+
 		} else {
 			fn(fmt.Sprintf("using already created layer %s", layer.Digest))
 		}
@@ -315,7 +313,7 @@ func SaveLayers(layers []*LayerWithBuffer, fn func(status string), force bool) e
 	return nil
 }
 
-func CreateManifest(name string, cfg *LayerWithBuffer, layers []*Layer) error {
+func CreateManifest(name string, cfg *LayerReader, layers []*Layer) error {
 	mp := ParseModelPath(name)
 
 	manifest := ManifestV2{
@@ -341,7 +339,7 @@ func CreateManifest(name string, cfg *LayerWithBuffer, layers []*Layer) error {
 	return os.WriteFile(fp, manifestJSON, 0o644)
 }
 
-func GetLayerWithBufferFromLayer(layer *Layer) (*LayerWithBuffer, error) {
+func GetLayerWithBufferFromLayer(layer *Layer) (*LayerReader, error) {
 	fp, err := GetBlobsPath(layer.Digest)
 	if err != nil {
 		return nil, err
@@ -361,7 +359,7 @@ func GetLayerWithBufferFromLayer(layer *Layer) (*LayerWithBuffer, error) {
 	return newLayer, nil
 }
 
-func paramsToReader(params map[string]string) (io.Reader, error) {
+func paramsToReader(params map[string]string) (io.ReadSeeker, error) {
 	opts := api.DefaultOptions()
 	typeOpts := reflect.TypeOf(opts)
 
@@ -419,7 +417,7 @@ func paramsToReader(params map[string]string) (io.Reader, error) {
 	return bytes.NewReader(bts), nil
 }
 
-func getLayerDigests(layers []*LayerWithBuffer) ([]string, error) {
+func getLayerDigests(layers []*LayerReader) ([]string, error) {
 	var digests []string
 	for _, l := range layers {
 		if l.Digest == "" {
@@ -431,34 +429,30 @@ func getLayerDigests(layers []*LayerWithBuffer) ([]string, error) {
 }
 
 // CreateLayer creates a Layer object from a given file
-func CreateLayer(f io.Reader) (*LayerWithBuffer, error) {
-	buf := new(bytes.Buffer)
-	_, err := io.Copy(buf, f)
-	if err != nil {
-		return nil, err
-	}
+func CreateLayer(f io.ReadSeeker) (*LayerReader, error) {
+	digest, size := GetSHA256Digest(f)
+	f.Seek(0, 0)
 
-	digest, size := GetSHA256Digest(buf)
-
-	layer := &LayerWithBuffer{
+	layer := &LayerReader{
 		Layer: Layer{
 			MediaType: "application/vnd.docker.image.rootfs.diff.tar",
 			Digest:    digest,
 			Size:      size,
 		},
-		Buffer: buf,
+		Reader: f,
 	}
 
 	return layer, nil
 }
 
-func PushModel(name, username, password string, fn func(status, digest string, Total, Completed int, Percent float64)) error {
+func PushModel(name, username, password string, fn func(api.ProgressResponse)) error {
 	mp := ParseModelPath(name)
 
-	fn("retrieving manifest", "", 0, 0, 0)
+	fn(api.ProgressResponse{Status: "retrieving manifest"})
+
 	manifest, err := GetManifest(mp)
 	if err != nil {
-		fn("couldn't retrieve manifest", "", 0, 0, 0)
+		fn(api.ProgressResponse{Status: "couldn't retrieve manifest"})
 		return err
 	}
 
@@ -480,11 +474,21 @@ func PushModel(name, username, password string, fn func(status, digest string, T
 
 		if exists {
 			completed += layer.Size
-			fn("using existing layer", layer.Digest, total, completed, float64(completed)/float64(total))
+			fn(api.ProgressResponse{
+				Status:    "using existing layer",
+				Digest:    layer.Digest,
+				Total:     total,
+				Completed: completed,
+			})
 			continue
 		}
 
-		fn("starting upload", layer.Digest, total, completed, float64(completed)/float64(total))
+		fn(api.ProgressResponse{
+			Status:    "starting upload",
+			Digest:    layer.Digest,
+			Total:     total,
+			Completed: completed,
+		})
 
 		location, err := startUpload(mp, username, password)
 		if err != nil {
@@ -498,10 +502,19 @@ func PushModel(name, username, password string, fn func(status, digest string, T
 			return err
 		}
 		completed += layer.Size
-		fn("upload complete", layer.Digest, total, completed, float64(completed)/float64(total))
+		fn(api.ProgressResponse{
+			Status:    "upload complete",
+			Digest:    layer.Digest,
+			Total:     total,
+			Completed: completed,
+		})
 	}
 
-	fn("pushing manifest", "", total, completed, float64(completed/total))
+	fn(api.ProgressResponse{
+		Status:    "pushing manifest",
+		Total:     total,
+		Completed: completed,
+	})
 	url := fmt.Sprintf("%s://%s/v2/%s/manifests/%s", mp.ProtocolScheme, mp.Registry, mp.GetNamespaceRepository(), mp.Tag)
 	headers := map[string]string{
 		"Content-Type": "application/vnd.docker.distribution.manifest.v2+json",
@@ -524,15 +537,19 @@ func PushModel(name, username, password string, fn func(status, digest string, T
 		return fmt.Errorf("registry responded with code %d: %v", resp.StatusCode, string(body))
 	}
 
-	fn("success", "", total, completed, 1.0)
+	fn(api.ProgressResponse{
+		Status:    "success",
+		Total:     total,
+		Completed: completed,
+	})
 
 	return nil
 }
 
-func PullModel(name, username, password string, fn func(status, digest string, Total, Completed int, Percent float64)) error {
+func PullModel(name, username, password string, fn func(api.ProgressResponse)) error {
 	mp := ParseModelPath(name)
 
-	fn("pulling manifest", "", 0, 0, 0)
+	fn(api.ProgressResponse{Status: "pulling manifest"})
 
 	manifest, err := pullModelManifest(mp, username, password)
 	if err != nil {
@@ -550,16 +567,15 @@ func PullModel(name, username, password string, fn func(status, digest string, T
 	total += manifest.Config.Size
 
 	for _, layer := range layers {
-		fn("starting download", layer.Digest, total, completed, float64(completed)/float64(total))
 		if err := downloadBlob(mp, layer.Digest, username, password, fn); err != nil {
-			fn(fmt.Sprintf("error downloading: %v", err), layer.Digest, 0, 0, 0)
+			fn(api.ProgressResponse{Status: fmt.Sprintf("error downloading: %v", err), Digest: layer.Digest})
 			return err
 		}
+
 		completed += layer.Size
-		fn("download complete", layer.Digest, total, completed, float64(completed)/float64(total))
 	}
 
-	fn("writing manifest", "", total, completed, 1.0)
+	fn(api.ProgressResponse{Status: "writing manifest"})
 
 	manifestJSON, err := json.Marshal(manifest)
 	if err != nil {
@@ -577,7 +593,7 @@ func PullModel(name, username, password string, fn func(status, digest string, T
 		return err
 	}
 
-	fn("success", "", total, completed, 1.0)
+	fn(api.ProgressResponse{Status: "success"})
 
 	return nil
 }
@@ -609,7 +625,7 @@ func pullModelManifest(mp ModelPath, username, password string) (*ManifestV2, er
 	return m, err
 }
 
-func createConfigLayer(layers []string) (*LayerWithBuffer, error) {
+func createConfigLayer(layers []string) (*LayerReader, error) {
 	// TODO change architecture and OS
 	config := ConfigV2{
 		Architecture: "arm64",
@@ -628,22 +644,26 @@ func createConfigLayer(layers []string) (*LayerWithBuffer, error) {
 	buf := bytes.NewBuffer(configJSON)
 	digest, size := GetSHA256Digest(buf)
 
-	layer := &LayerWithBuffer{
+	layer := &LayerReader{
 		Layer: Layer{
 			MediaType: "application/vnd.docker.container.image.v1+json",
 			Digest:    digest,
 			Size:      size,
 		},
-		Buffer: buf,
+		Reader: buf,
 	}
 	return layer, nil
 }
 
 // GetSHA256Digest returns the SHA256 hash of a given buffer and returns it, and the size of buffer
-func GetSHA256Digest(data *bytes.Buffer) (string, int) {
-	layerBytes := data.Bytes()
-	hash := sha256.Sum256(layerBytes)
-	return "sha256:" + hex.EncodeToString(hash[:]), len(layerBytes)
+func GetSHA256Digest(r io.Reader) (string, int) {
+	h := sha256.New()
+	n, err := io.Copy(h, r)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return fmt.Sprintf("sha256:%x", h.Sum(nil)), int(n)
 }
 
 func startUpload(mp ModelPath, username string, password string) (string, error) {
@@ -725,16 +745,20 @@ func uploadBlob(location string, layer *Layer, username string, password string)
 	return nil
 }
 
-func downloadBlob(mp ModelPath, digest string, username, password string, fn func(status, digest string, Total, Completed int, Percent float64)) error {
+func downloadBlob(mp ModelPath, digest string, username, password string, fn func(api.ProgressResponse)) error {
 	fp, err := GetBlobsPath(digest)
 	if err != nil {
 		return err
 	}
 
-	_, err = os.Stat(fp)
-	if !os.IsNotExist(err) {
+	if fi, _ := os.Stat(fp); fi != nil {
 		// we already have the file, so return
-		log.Printf("already have %s\n", digest)
+		fn(api.ProgressResponse{
+			Digest:    digest,
+			Total:     int(fi.Size()),
+			Completed: int(fi.Size()),
+		})
+
 		return nil
 	}
 
@@ -783,10 +807,21 @@ func downloadBlob(mp ModelPath, digest string, username, password string, fn fun
 	total := remaining + completed
 
 	for {
-		fn(fmt.Sprintf("Downloading %s", digest), digest, int(total), int(completed), float64(completed)/float64(total))
+		fn(api.ProgressResponse{
+			Status:    fmt.Sprintf("downloading %s", digest),
+			Digest:    digest,
+			Total:     int(total),
+			Completed: int(completed),
+		})
+
 		if completed >= total {
 			if err := os.Rename(fp+"-partial", fp); err != nil {
-				fn(fmt.Sprintf("error renaming file: %v", err), digest, int(total), int(completed), 1)
+				fn(api.ProgressResponse{
+					Status:    fmt.Sprintf("error renaming file: %v", err),
+					Digest:    digest,
+					Total:     int(total),
+					Completed: int(completed),
+				})
 				return err
 			}
 

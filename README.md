@@ -1,75 +1,65 @@
-![ollama](https://github.com/jmorganca/ollama/assets/251292/961f99bb-251a-4eec-897d-1ba99997ad0f)
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" height="200px" srcset="https://github.com/jmorganca/ollama/assets/3325447/318048d2-b2dd-459c-925a-ac8449d5f02c">
+    <img alt="logo" height="200px" src="https://github.com/jmorganca/ollama/assets/3325447/c7d6e15f-7f4d-4776-b568-c084afa297c2">
+  </picture>
+</div>
 
 # Ollama
 
-Run large language models with `llama.cpp`.
+Create, run, and share self-contained large language models (LLMs). Ollama bundles a model’s weights, configuration, prompts, and more into self-contained packages that run anywhere.
 
-> Note: certain models that can be run with Ollama are intended for research and/or non-commercial use only.
+> Note: Ollama is in early preview. Please report any issues you find.
 
-### Features
+## Download
 
-- Download and run popular large language models
-- Switch between multiple models on the fly
-- Hardware acceleration where available (Metal, CUDA)
-- Fast inference server written in Go, powered by [llama.cpp](https://github.com/ggerganov/llama.cpp)
-- REST API to use with your application (python, typescript SDKs coming soon)
+- [Download](https://ollama.ai/download) for macOS on Apple Silicon (Intel coming soon)
+- Download for Windows and Linux (coming soon)
+- Build [from source](#building)
 
-## Install
+## Examples
 
-- [Download](https://ollama.ai/download) for macOS with Apple Silicon (Intel coming soon)
-- Download for Windows (coming soon)
-
-You can also build the [binary from source](#building).
-
-## Quickstart
-
-Run a fast and simple model.
+### Quickstart
 
 ```
-ollama run orca
+ollama run llama2
+>>> hi
+Hello! How can I help you today?
 ```
 
-## Example models
+### Creating a custom model
 
-### 💬 Chat
-
-Have a conversation.
+Create a `Modelfile`:
 
 ```
-ollama run vicuna "Why is the sky blue?"
+FROM llama2
+PROMPT """
+You are Mario from Super Mario Bros. Answer as Mario, the assistant, only.
+
+User: {{ .Prompt }}
+Mario:
+"""
 ```
 
-### 🗺️ Instructions
-
-Get a helping hand.
+Next, create and run the model:
 
 ```
-ollama run orca "Write an email to my boss."
+ollama create mario -f ./Modelfile
+ollama run mario
+>>> hi
+Hello! It's your friend Mario.
 ```
 
-### 🔎 Ask questions about documents
+## Model library
 
-Send the contents of a document and ask questions about it.
+Ollama includes a library of open-source, pre-trained models. More models are coming soon.
 
-```
-ollama run nous-hermes "$(cat input.txt)", please summarize this story
-```
-
-### 📖 Storytelling
-
-Venture into the unknown.
-
-```
-ollama run nous-hermes "Once upon a time"
-```
-
-## Advanced usage
-
-### Run a local model
-
-```
-ollama run ~/Downloads/vicuna-7b-v1.3.ggmlv3.q4_1.bin
-```
+| Model       | Parameters | Size  | Download                  |
+| ----------- | ---------- | ----- | ------------------------- |
+| Llama2      | 7B         | 3.8GB | `ollama pull llama2`      |
+| Orca Mini   | 3B         | 1.9GB | `ollama pull orca`        |
+| Vicuna      | 7B         | 3.8GB | `ollama pull vicuna`      |
+| Nous-Hermes | 13B         | 7.3GB | `ollama pull nous-hermes` |
 
 ## Building
 
@@ -86,23 +76,5 @@ To run it start the server:
 Finally, run a model!
 
 ```
-./ollama run ~/Downloads/vicuna-7b-v1.3.ggmlv3.q4_1.bin
-```
-
-## API Reference
-
-### `POST /api/pull`
-
-Download a model
-
-```
-curl -X POST http://localhost:11343/api/pull -d '{"model": "orca"}'
-```
-
-### `POST /api/generate`
-
-Complete a prompt
-
-```
-curl -X POST http://localhost:11434/api/generate -d '{"model": "orca", "prompt": "hello!"}'
+./ollama run llama2
 ```
