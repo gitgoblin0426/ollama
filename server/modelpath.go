@@ -106,10 +106,10 @@ func GetBlobsPath(digest string) (string, error) {
 		return "", err
 	}
 
-	path := filepath.Join(home, ".ollama", "models", "blobs", digest)
+	path := filepath.Join(home, ".ollama", "models", "blobs")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", err
 	}
 
-	return path, nil
+	return filepath.Join(path, digest), nil
 }

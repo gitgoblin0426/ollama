@@ -206,8 +206,8 @@ func list(c *gin.Context) {
 			mp := ParseModelPath(tag)
 			manifest, err := GetManifest(mp)
 			if err != nil {
-				log.Printf("skipping file: %s", fp)
-				return nil
+				log.Printf("couldn't get manifest: %v", err)
+				return err
 			}
 			model := api.ListResponseModel{
 				Name:       mp.GetShortTagname(),
