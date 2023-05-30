@@ -25,23 +25,13 @@ FROM <image>[:<tag>]
 
 This defines the base model to be used. An image can be a known image on the Ollama Hub, or a fully-qualified path to a model file on your system
 
-## LICENSE
-
-```modelfile
-LICENSE """
-<license text>
-"""
-```
-
-Some models need to be distributed with a license agreement. For example, the distribution clause for the Llama2 license requires including the license with the model. 
-
 ## PARAMETER
+
+The PARAMETER instruction defines a parameter that can be set when the model is run. 
 
 ```modelfile
 PARAMETER <parameter> <parametervalue>
 ```
-
-The PARAMETER instruction defines a parameter that can be set when the model is run.
 
 ### Valid Parameters and Values
 

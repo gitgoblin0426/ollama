@@ -1,8 +1,7 @@
 # Modelfile for creating a Midjourney prompts from a topic
-# This prompt was adapted from the original at https://www.greataiprompts.com/guide/midjourney/best-chatgpt-prompt-for-midjourney/
 # Run `ollama create mj -f pathtofile` and then `ollama run mj` and enter a topic
 
-FROM nous-hermes
+FROM library/nous-hermes:latest
 PROMPT """
 {{- if not .Context }}
 ### System:
