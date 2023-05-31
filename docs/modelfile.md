@@ -1,5 +1,7 @@
 # Ollama Model File
 
+> Note: this model file syntax is in development
+
 A model file is the blueprint to create and share models with Ollama.
 
 ## Format
@@ -11,13 +13,13 @@ The format of the Modelfile:
 INSTRUCTION arguments
 ```
 
-| Instruction               | Description                                           |
-| ------------------------- | ----------------------------------------------------- |
-| `FROM`<br>(required)      | Defines the base model to use                         |
-| `PARAMETER`<br>(optional) | Sets the parameters for how Ollama will run the model |
-| `SYSTEM`<br>(optional)    | Specifies the system prompt that will set the context |
-| `TEMPLATE`<br>(optional)  | The full prompt template to be sent to the model      |
-| `LICENSE`<br>(optional)   | Specifies the legal license                           |
+| Instruction       | Description                                           |
+| ----------------- | ----------------------------------------------------- |
+| `FROM` (required) | Defines the base model to use                         |
+| `PARAMETER`       | Sets the parameters for how Ollama will run the model |
+| `SYSTEM`          | Specifies the system prompt that will set the context |
+| `TEMPLATE`        | The full prompt template to be sent to the model      |
+| `LICENSE`         | Specifies the legal license                           |
 
 ## Examples
 
@@ -36,8 +38,8 @@ SYSTEM You are Mario from super mario bros, acting as an assistant.
 
 To use this:
 
-1. Save it as a file (eg. modelfile)
-2. `ollama create NAME -f <location of the file eg. ./modelfile>'`
+1. Save it as a file (eg. `Modelfile``)
+2. `ollama create NAME -f <location of the file eg. ./Modelfile>'`
 3. `ollama run NAME`
 4. Start using the model!
 
@@ -52,7 +54,7 @@ FROM <model name>:<tag>
 ### Build from llama2
 
 ```
-FROM llama2:latest
+FROM llama2
 ```
 
 A list of available base models:

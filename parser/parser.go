@@ -39,7 +39,7 @@ func Parse(reader io.Reader) ([]Command, error) {
 			command.Args = string(fields[1])
 			// copy command for validation
 			modelCommand = command
-		case "LICENSE", "TEMPLATE", "SYSTEM":
+		case "LICENSE", "TEMPLATE", "SYSTEM", "PROMPT":
 			command.Name = string(bytes.ToLower(fields[0]))
 			command.Args = string(fields[1])
 		case "PARAMETER":
@@ -62,30 +62,20 @@ func Parse(reader io.Reader) ([]Command, error) {
 }
 
 func scanModelfile(data []byte, atEOF bool) (advance int, token []byte, err error) {
-	if atEOF || len(data) == 0 {
-		return 0, nil, nil
-	}
-
 	newline := bytes.IndexByte(data, '\n')
 
 	if start := bytes.Index(data, []byte(`"""`)); start >= 0 && start < newline {
 		end := bytes.Index(data[start+3:], []byte(`"""`))
 		if end < 0 {
-			return 0, nil, errors.New(`unterminated multiline string: """`)
+			if atEOF {
+				return 0, nil, errors.New(`unterminated multiline string: """`)
+			} else {
+				return 0, nil, nil
+			}
 		}
 
 		n := start + 3 + end + 3
 		return n, bytes.Replace(data[:n], []byte(`"""`), []byte(""), 2), nil
-	}
-
-	if start := bytes.Index(data, []byte(`'''`)); start >= 0 && start < newline {
-		end := bytes.Index(data[start+3:], []byte(`'''`))
-		if end < 0 {
-			return 0, nil, errors.New("unterminated multiline string: '''")
-		}
-
-		n := start + 3 + end + 3
-		return n, bytes.Replace(data[:n], []byte("'''"), []byte(""), 2), nil
 	}
 
 	return bufio.ScanLines(data, atEOF)
