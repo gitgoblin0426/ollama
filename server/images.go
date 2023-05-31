@@ -605,14 +605,22 @@ func PullModel(name, username, password string, fn func(api.ProgressResponse)) e
 	}
 
 	var layers []*Layer
-	layers = append(layers, manifest.Layers...)
+	var total int
+	var completed int
+	for _, layer := range manifest.Layers {
+		layers = append(layers, layer)
+		total += layer.Size
+	}
 	layers = append(layers, &manifest.Config)
+	total += manifest.Config.Size
 
 	for _, layer := range layers {
 		if err := downloadBlob(mp, layer.Digest, username, password, fn); err != nil {
 			fn(api.ProgressResponse{Status: fmt.Sprintf("error downloading: %v", err), Digest: layer.Digest})
 			return err
 		}
+
+		completed += layer.Size
 	}
 
 	fn(api.ProgressResponse{Status: "writing manifest"})
@@ -627,7 +635,7 @@ func PullModel(name, username, password string, fn func(api.ProgressResponse)) e
 		return err
 	}
 
-	err = os.WriteFile(fp, manifestJSON, 0o644)
+	err = os.WriteFile(fp, manifestJSON, 0644)
 	if err != nil {
 		log.Printf("couldn't write to %s", fp)
 		return err
