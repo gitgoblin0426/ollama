@@ -192,7 +192,6 @@ func CreateModel(name string, path string, fn func(status string)) error {
 	fn("parsing modelfile")
 	commands, err := parser.Parse(mf)
 	if err != nil {
-		fn(fmt.Sprintf("error: %v", err))
 		return err
 	}
 
@@ -227,14 +226,12 @@ func CreateModel(name string, path string, fn func(status string)) error {
 				fn("creating model layer")
 				file, err := os.Open(fp)
 				if err != nil {
-					fn(fmt.Sprintf("couldn't find model '%s'", c.Args))
 					return fmt.Errorf("failed to open file: %v", err)
 				}
 				defer file.Close()
 
 				l, err := CreateLayer(file)
 				if err != nil {
-					fn(fmt.Sprintf("couldn't create model layer: %v", err))
 					return fmt.Errorf("failed to create layer: %v", err)
 				}
 				l.MediaType = "application/vnd.ollama.image.model"
@@ -244,7 +241,6 @@ func CreateModel(name string, path string, fn func(status string)) error {
 				for _, l := range mf.Layers {
 					newLayer, err := GetLayerWithBufferFromLayer(l)
 					if err != nil {
-						fn(fmt.Sprintf("couldn't read layer: %v", err))
 						return err
 					}
 					layers = append(layers, newLayer)
@@ -304,7 +300,6 @@ func CreateModel(name string, path string, fn func(status string)) error {
 
 	err = SaveLayers(layers, fn, false)
 	if err != nil {
-		fn(fmt.Sprintf("error saving layers: %v", err))
 		return err
 	}
 
@@ -312,7 +307,6 @@ func CreateModel(name string, path string, fn func(status string)) error {
 	fn("writing manifest")
 	err = CreateManifest(name, cfg, manifestLayers)
 	if err != nil {
-		fn(fmt.Sprintf("error creating manifest: %v", err))
 		return err
 	}
 
@@ -605,22 +599,13 @@ func PullModel(name, username, password string, fn func(api.ProgressResponse)) e
 	}
 
 	var layers []*Layer
-	var total int
-	var completed int
-	for _, layer := range manifest.Layers {
-		layers = append(layers, layer)
-		total += layer.Size
-	}
+	layers = append(layers, manifest.Layers...)
 	layers = append(layers, &manifest.Config)
-	total += manifest.Config.Size
 
 	for _, layer := range layers {
 		if err := downloadBlob(mp, layer.Digest, username, password, fn); err != nil {
-			fn(api.ProgressResponse{Status: fmt.Sprintf("error downloading: %v", err), Digest: layer.Digest})
 			return err
 		}
-
-		completed += layer.Size
 	}
 
 	fn(api.ProgressResponse{Status: "writing manifest"})
@@ -635,7 +620,7 @@ func PullModel(name, username, password string, fn func(api.ProgressResponse)) e
 		return err
 	}
 
-	err = os.WriteFile(fp, manifestJSON, 0644)
+	err = os.WriteFile(fp, manifestJSON, 0o644)
 	if err != nil {
 		log.Printf("couldn't write to %s", fp)
 		return err

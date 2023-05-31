@@ -27,7 +27,7 @@ func checkError(resp *http.Response, body []byte) error {
 	err := json.Unmarshal(body, &apiError)
 	if err != nil {
 		// Use the full body as the message if we fail to decode a response.
-		apiError.ErrorMessage = string(body)
+		apiError.Message = string(body)
 	}
 
 	return apiError
@@ -92,6 +92,7 @@ func (c *Client) do(ctx context.Context, method, path string, reqData, respData 
 		}
 	}
 	return nil
+
 }
 
 func (c *Client) stream(ctx context.Context, method, path string, data any, fn func([]byte) error) error {
@@ -130,11 +131,15 @@ func (c *Client) stream(ctx context.Context, method, path string, data any, fn f
 			return fmt.Errorf("unmarshal: %w", err)
 		}
 
+		if errorResponse.Error != "" {
+			return fmt.Errorf("stream: %s", errorResponse.Error)
+		}
+
 		if response.StatusCode >= 400 {
 			return StatusError{
-				StatusCode:   response.StatusCode,
-				Status:       response.Status,
-				ErrorMessage: errorResponse.Error,
+				StatusCode: response.StatusCode,
+				Status:     response.Status,
+				Message:    errorResponse.Error,
 			}
 		}
 

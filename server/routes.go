@@ -2,7 +2,6 @@ package server
 
 import (
 	"encoding/json"
-	"errors"
 	"io"
 	"log"
 	"net"
@@ -18,15 +17,6 @@ import (
 	"github.com/jmorganca/ollama/api"
 	"github.com/jmorganca/ollama/llama"
 )
-
-func cacheDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		panic(err)
-	}
-
-	return filepath.Join(home, ".ollama")
-}
 
 func generate(c *gin.Context) {
 	start := time.Now()
@@ -70,7 +60,7 @@ func generate(c *gin.Context) {
 	ch := make(chan any)
 	go func() {
 		defer close(ch)
-		llm.Predict(req.Context, prompt, func(r api.GenerateResponse) {
+		fn := func(r api.GenerateResponse) {
 			r.Model = req.Model
 			r.CreatedAt = time.Now().UTC()
 			if r.Done {
@@ -78,7 +68,11 @@ func generate(c *gin.Context) {
 			}
 
 			ch <- r
-		})
+		}
+
+		if err := llm.Predict(req.Context, prompt, fn); err != nil {
+			ch <- gin.H{"error": err.Error()}
+		}
 	}()
 
 	streamResponse(c, ch)
@@ -99,8 +93,7 @@ func pull(c *gin.Context) {
 		}
 
 		if err := PullModel(req.Name, req.Username, req.Password, fn); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+			ch <- gin.H{"error": err.Error()}
 		}
 	}()
 
@@ -122,8 +115,7 @@ func push(c *gin.Context) {
 		}
 
 		if err := PushModel(req.Name, req.Username, req.Password, fn); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+			ch <- gin.H{"error": err.Error()}
 		}
 	}()
 
@@ -147,8 +139,7 @@ func create(c *gin.Context) {
 		}
 
 		if err := CreateModel(req.Name, req.Path, fn); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
-			return
+			ch <- gin.H{"error": err.Error()}
 		}
 	}()
 
@@ -164,10 +155,6 @@ func list(c *gin.Context) {
 	}
 	err = filepath.Walk(fp, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				log.Printf("manifest file does not exist: %s", fp)
-				return nil
-			}
 			return err
 		}
 		if !info.IsDir() {
