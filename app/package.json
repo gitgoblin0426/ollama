@@ -11,9 +11,7 @@
     "make": "electron-forge make",
     "make:sign": "SIGN=1 electron-forge make",
     "publish": "SIGN=1 electron-forge publish",
-    "lint": "eslint --ext .ts,.tsx .",
-    "format": "prettier --check . --ignore-path .gitignore",
-    "format:fix": "prettier --write . --ignore-path .gitignore"
+    "lint": "eslint --ext .ts,.tsx ."
   },
   "keywords": [],
   "author": {
