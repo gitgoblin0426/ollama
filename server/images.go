@@ -684,7 +684,7 @@ func PullModel(name string, regOpts *RegistryOptions, fn func(api.ProgressRespon
 
 	manifest, err := pullModelManifest(mp, regOpts)
 	if err != nil {
-		return fmt.Errorf("pull model manifest: %s", err)
+		return fmt.Errorf("pull model manifest: %q", err)
 	}
 
 	var layers []*Layer
@@ -738,8 +738,6 @@ func PullModel(name string, regOpts *RegistryOptions, fn func(api.ProgressRespon
 	return nil
 }
 
-var errModelNotFound = fmt.Errorf("model not found")
-
 func pullModelManifest(mp ModelPath, regOpts *RegistryOptions) (*ManifestV2, error) {
 	url := fmt.Sprintf("%s/v2/%s/manifests/%s", mp.Registry, mp.GetNamespaceRepository(), mp.Tag)
 	headers := map[string]string{
@@ -755,9 +753,6 @@ func pullModelManifest(mp ModelPath, regOpts *RegistryOptions) (*ManifestV2, err
 
 	// Check for success: For a successful upload, the Docker registry will respond with a 201 Created
 	if resp.StatusCode != http.StatusOK {
-		if resp.StatusCode == http.StatusNotFound {
-			return nil, errModelNotFound
-		}
 		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("on pull registry responded with code %d: %s", resp.StatusCode, body)
 	}
