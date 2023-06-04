@@ -48,11 +48,6 @@ type DeleteRequest struct {
 	Name string `json:"name"`
 }
 
-type CopyRequest struct {
-	Source      string `json:"source"`
-	Destination string `json:"destination"`
-}
-
 type PullRequest struct {
 	Name     string `json:"name"`
 	Insecure bool   `json:"insecure,omitempty"`
