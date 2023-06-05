@@ -40,6 +40,10 @@ type CreateRequest struct {
 	Path string `json:"path"`
 }
 
+type CreateProgress struct {
+	Status string `json:"status"`
+}
+
 type DeleteRequest struct {
 	Name string `json:"name"`
 }

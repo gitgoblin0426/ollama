@@ -187,15 +187,15 @@ func GetModel(name string) (*Model, error) {
 	return model, nil
 }
 
-func CreateModel(name string, path string, fn func(resp api.ProgressResponse)) error {
+func CreateModel(name string, path string, fn func(status string)) error {
 	mf, err := os.Open(path)
 	if err != nil {
-		fn(api.ProgressResponse{Status: fmt.Sprintf("couldn't open modelfile '%s'", path)})
+		fn(fmt.Sprintf("couldn't open modelfile '%s'", path))
 		return fmt.Errorf("failed to open file: %w", err)
 	}
 	defer mf.Close()
 
-	fn(api.ProgressResponse{Status: "parsing modelfile"})
+	fn("parsing modelfile")
 	commands, err := parser.Parse(mf)
 	if err != nil {
 		return err
@@ -208,7 +208,7 @@ func CreateModel(name string, path string, fn func(resp api.ProgressResponse)) e
 		log.Printf("[%s] - %s\n", c.Name, c.Args)
 		switch c.Name {
 		case "model":
-			fn(api.ProgressResponse{Status: "looking for model"})
+			fn("looking for model")
 			mf, err := GetManifest(ParseModelPath(c.Args))
 			if err != nil {
 				fp := c.Args
@@ -229,40 +229,20 @@ func CreateModel(name string, path string, fn func(resp api.ProgressResponse)) e
 					fp = filepath.Join(filepath.Dir(path), fp)
 				}
 
-				if _, err := os.Stat(fp); err != nil {
-					// the model file does not exist, try pulling it
-					if errors.Is(err, os.ErrNotExist) {
-						fn(api.ProgressResponse{Status: "pulling model file"})
-						if err := PullModel(c.Args, &RegistryOptions{}, fn); err != nil {
-							return err
-						}
-						mf, err = GetManifest(ParseModelPath(c.Args))
-						if err != nil {
-							return fmt.Errorf("failed to open file after pull: %v", err)
-						}
-
-					} else {
-						return err
-					}
-				} else {
-					// create a model from this specified file
-					fn(api.ProgressResponse{Status: "creating model layer"})
-
-					file, err := os.Open(fp)
-					if err != nil {
-						return fmt.Errorf("failed to open file: %v", err)
-					}
-					defer file.Close()
-
-					l, err := CreateLayer(file)
-					if err != nil {
-						return fmt.Errorf("failed to create layer: %v", err)
-					}
-					l.MediaType = "application/vnd.ollama.image.model"
-					layers = append(layers, l)
+				fn("creating model layer")
+				file, err := os.Open(fp)
+				if err != nil {
+					return fmt.Errorf("failed to open file: %v", err)
 				}
-			}
-			if mf != nil {
+				defer file.Close()
+
+				l, err := CreateLayer(file)
+				if err != nil {
+					return fmt.Errorf("failed to create layer: %v", err)
+				}
+				l.MediaType = "application/vnd.ollama.image.model"
+				layers = append(layers, l)
+			} else {
 				log.Printf("manifest = %#v", mf)
 				for _, l := range mf.Layers {
 					newLayer, err := GetLayerWithBufferFromLayer(l)
@@ -273,7 +253,7 @@ func CreateModel(name string, path string, fn func(resp api.ProgressResponse)) e
 				}
 			}
 		case "license", "template", "system", "prompt":
-			fn(api.ProgressResponse{Status: fmt.Sprintf("creating model %s layer", c.Name)})
+			fn(fmt.Sprintf("creating %s layer", c.Name))
 			// remove the prompt layer if one exists
 			mediaType := fmt.Sprintf("application/vnd.ollama.image.%s", c.Name)
 			layers = removeLayerFromLayers(layers, mediaType)
@@ -292,7 +272,7 @@ func CreateModel(name string, path string, fn func(resp api.ProgressResponse)) e
 
 	// Create a single layer for the parameters
 	if len(params) > 0 {
-		fn(api.ProgressResponse{Status: "creating parameter layer"})
+		fn("creating parameter layer")
 		layers = removeLayerFromLayers(layers, "application/vnd.ollama.image.params")
 		paramData, err := paramsToReader(params)
 		if err != nil {
@@ -317,7 +297,7 @@ func CreateModel(name string, path string, fn func(resp api.ProgressResponse)) e
 	}
 
 	// Create a layer for the config object
-	fn(api.ProgressResponse{Status: "creating config layer"})
+	fn("creating config layer")
 	cfg, err := createConfigLayer(digests)
 	if err != nil {
 		return err
@@ -330,13 +310,13 @@ func CreateModel(name string, path string, fn func(resp api.ProgressResponse)) e
 	}
 
 	// Create the manifest
-	fn(api.ProgressResponse{Status: "writing manifest"})
+	fn("writing manifest")
 	err = CreateManifest(name, cfg, manifestLayers)
 	if err != nil {
 		return err
 	}
 
-	fn(api.ProgressResponse{Status: "success"})
+	fn("success")
 	return nil
 }
 
@@ -351,7 +331,7 @@ func removeLayerFromLayers(layers []*LayerReader, mediaType string) []*LayerRead
 	return layers[:j]
 }
 
-func SaveLayers(layers []*LayerReader, fn func(resp api.ProgressResponse), force bool) error {
+func SaveLayers(layers []*LayerReader, fn func(status string), force bool) error {
 	// Write each of the layers to disk
 	for _, layer := range layers {
 		fp, err := GetBlobsPath(layer.Digest)
@@ -361,8 +341,7 @@ func SaveLayers(layers []*LayerReader, fn func(resp api.ProgressResponse), force
 
 		_, err = os.Stat(fp)
 		if os.IsNotExist(err) || force {
-			fn(api.ProgressResponse{Status: fmt.Sprintf("writing layer %s", layer.Digest)})
-
+			fn(fmt.Sprintf("writing layer %s", layer.Digest))
 			out, err := os.Create(fp)
 			if err != nil {
 				log.Printf("couldn't create %s", fp)
@@ -375,7 +354,7 @@ func SaveLayers(layers []*LayerReader, fn func(resp api.ProgressResponse), force
 			}
 
 		} else {
-			fn(api.ProgressResponse{Status: fmt.Sprintf("using already created layer %s", layer.Digest)})
+			fn(fmt.Sprintf("using already created layer %s", layer.Digest))
 		}
 	}
 
