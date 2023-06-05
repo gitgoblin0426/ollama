@@ -3,7 +3,7 @@ package llama
 /*
 #cgo CPPFLAGS: -O3 -DNDEBUG=1
 #cgo CXXFLAGS: -std=c++11
-#cgo darwin CPPFLAGS: -DGGML_USE_METAL=1 -DGGML_METAL_NDEBUG=1
+#cgo darwin CPPFLAGS: -DGGML_USE_ACCELERATE -DGGML_USE_METAL -DGGML_METAL_NDEBUG
 #cgo darwin LDFLAGS: -framework Accelerate -framework Foundation -framework Metal -framework MetalKit -framework MetalPerformanceShaders
 #include <stdlib.h>
 #include "llama.h"
@@ -168,7 +168,7 @@ func (llm *llama) tokenize(prompt string) []C.llama_token {
 	cPrompt := C.CString(prompt)
 	defer C.free(unsafe.Pointer(cPrompt))
 
-	tokens := make([]C.llama_token, llm.NumCtx)
+	tokens := make([]C.llama_token, len(prompt)+1)
 	if n := C.llama_tokenize(llm.ctx, cPrompt, unsafe.SliceData(tokens), C.int(len(tokens)), true); n > 0 {
 		return tokens[:n]
 	}

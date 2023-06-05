@@ -131,7 +131,7 @@ func (c *Client) stream(ctx context.Context, method, path string, data any, fn f
 		}
 
 		if errorResponse.Error != "" {
-			return fmt.Errorf("stream: %s", errorResponse.Error)
+			return fmt.Errorf(errorResponse.Error)
 		}
 
 		if response.StatusCode >= 400 {
@@ -208,6 +208,13 @@ func (c *Client) List(ctx context.Context) (*ListResponse, error) {
 		return nil, err
 	}
 	return &lr, nil
+}
+
+func (c *Client) Copy(ctx context.Context, req *CopyRequest) error {
+	if err := c.do(ctx, http.MethodPost, "/api/copy", req, nil); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (c *Client) Delete(ctx context.Context, req *DeleteRequest) error {
