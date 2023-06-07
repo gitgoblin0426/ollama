@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"dario.cat/mergo"
@@ -22,21 +21,8 @@ import (
 	"github.com/jmorganca/ollama/llama"
 )
 
-var activeSession struct {
-	mu sync.Mutex
-
-	id  int64
-	llm *llama.LLM
-
-	expireAt    time.Time
-	expireTimer *time.Timer
-}
-
 func GenerateHandler(c *gin.Context) {
-	activeSession.mu.Lock()
-	defer activeSession.mu.Unlock()
-
-	checkpointStart := time.Now()
+	start := time.Now()
 
 	var req api.GenerateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -50,58 +36,16 @@ func GenerateHandler(c *gin.Context) {
 		return
 	}
 
-	if req.SessionID == 0 || req.SessionID != activeSession.id {
-		if activeSession.llm != nil {
-			activeSession.llm.Close()
-			activeSession.llm = nil
-		}
-
-		opts := api.DefaultOptions()
-		if err := mergo.Merge(&opts, model.Options, mergo.WithOverride); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-
-		if err := mergo.Merge(&opts, req.Options, mergo.WithOverride); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-
-		llm, err := llama.New(model.ModelPath, opts)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-
-		activeSession.id = time.Now().UnixNano()
-		activeSession.llm = llm
+	opts := api.DefaultOptions()
+	if err := mergo.Merge(&opts, model.Options, mergo.WithOverride); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
 	}
 
-	sessionDuration := req.SessionDuration
-	sessionID := activeSession.id
-
-	activeSession.expireAt = time.Now().Add(sessionDuration.Duration)
-	if activeSession.expireTimer == nil {
-		activeSession.expireTimer = time.AfterFunc(sessionDuration.Duration, func() {
-			activeSession.mu.Lock()
-			defer activeSession.mu.Unlock()
-
-			if sessionID != activeSession.id {
-				return
-			}
-
-			if time.Now().Before(activeSession.expireAt) {
-				return
-			}
-
-			activeSession.llm.Close()
-			activeSession.llm = nil
-			activeSession.id = 0
-		})
+	if err := mergo.Merge(&opts, req.Options, mergo.WithOverride); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
 	}
-	activeSession.expireTimer.Reset(sessionDuration.Duration)
-
-	checkpointLoaded := time.Now()
 
 	prompt, err := model.Prompt(req)
 	if err != nil {
@@ -109,26 +53,27 @@ func GenerateHandler(c *gin.Context) {
 		return
 	}
 
+	llm, err := llama.New(model.ModelPath, opts)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	defer llm.Close()
+
 	ch := make(chan any)
 	go func() {
 		defer close(ch)
 		fn := func(r api.GenerateResponse) {
-			activeSession.expireAt = time.Now().Add(sessionDuration.Duration)
-			activeSession.expireTimer.Reset(sessionDuration.Duration)
-
 			r.Model = req.Model
 			r.CreatedAt = time.Now().UTC()
-			r.SessionID = activeSession.id
-			r.SessionExpiresAt = activeSession.expireAt.UTC()
 			if r.Done {
-				r.TotalDuration = time.Since(checkpointStart)
-				r.LoadDuration = checkpointLoaded.Sub(checkpointStart)
+				r.TotalDuration = time.Since(start)
 			}
 
 			ch <- r
 		}
 
-		if err := activeSession.llm.Predict(req.Context, prompt, fn); err != nil {
+		if err := llm.Predict(req.Context, prompt, fn); err != nil {
 			ch <- gin.H{"error": err.Error()}
 		}
 	}()
@@ -278,7 +223,7 @@ func ListModelsHandler(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, api.ListResponse{Models: models})
+	c.JSON(http.StatusOK, api.ListResponse{models})
 }
 
 func CopyModelHandler(c *gin.Context) {
