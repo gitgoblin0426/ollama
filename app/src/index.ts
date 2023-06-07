@@ -36,7 +36,6 @@ app.on('ready', () => {
   const gotTheLock = app.requestSingleInstanceLock()
   if (!gotTheLock) {
     app.exit(0)
-    return
   }
 
   app.on('second-instance', () => {
@@ -56,6 +55,10 @@ app.on('ready', () => {
 
   init()
 })
+
+if (process.platform === 'darwin') {
+  app.dock.hide()
+}
 
 function firstRunWindow() {
   // Create the browser window.
@@ -195,10 +198,6 @@ function init() {
   server()
 
   if (store.get('first-time-run') && installed()) {
-    if (process.platform === 'darwin') {
-      app.dock.hide()
-    }
-
     app.setLoginItemSettings({ openAtLogin: app.getLoginItemSettings().openAtLogin })
     return
   }
