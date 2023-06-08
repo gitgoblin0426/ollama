@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -527,13 +528,13 @@ func CopyModel(src, dest string) error {
 	}
 
 	// copy the file
-	input, err := os.ReadFile(srcPath)
+	input, err := ioutil.ReadFile(srcPath)
 	if err != nil {
 		fmt.Println("Error reading file:", err)
 		return err
 	}
 
-	err = os.WriteFile(destPath, input, 0o644)
+	err = ioutil.WriteFile(destPath, input, 0o644)
 	if err != nil {
 		fmt.Println("Error reading file:", err)
 		return err
@@ -590,6 +591,10 @@ func DeleteModel(name string) error {
 		}
 		return nil
 	})
+
+	if err != nil {
+		return err
+	}
 
 	// only delete the files which are still in the deleteMap
 	for k, v := range deleteMap {
@@ -1008,7 +1013,7 @@ func downloadBlob(mp ModelPath, digest string, regOpts *RegistryOptions, fn func
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := ioutil.ReadAll(resp.Body)
 		return fmt.Errorf("on download registry responded with code %d: %v", resp.StatusCode, string(body))
 	}
 
