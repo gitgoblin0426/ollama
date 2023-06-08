@@ -202,7 +202,7 @@ func CreateModel(name string, path string, fn func(resp api.ProgressResponse)) e
 	}
 
 	var layers []*LayerReader
-	params := make(map[string][]string)
+	params := make(map[string]string)
 
 	for _, c := range commands {
 		log.Printf("[%s] - %s\n", c.Name, c.Args)
@@ -286,8 +286,8 @@ func CreateModel(name string, path string, fn func(resp api.ProgressResponse)) e
 			layer.MediaType = mediaType
 			layers = append(layers, layer)
 		default:
-			// runtime parameters, build a list of args for each parameter to allow multiple values to be specified (ex: multiple stop tokens)
-			params[c.Name] = append(params[c.Name], c.Args)
+			// runtime parameters
+			params[c.Name] = c.Args
 		}
 	}
 
@@ -429,7 +429,7 @@ func GetLayerWithBufferFromLayer(layer *Layer) (*LayerReader, error) {
 	return newLayer, nil
 }
 
-func paramsToReader(params map[string][]string) (io.ReadSeeker, error) {
+func paramsToReader(params map[string]string) (io.ReadSeeker, error) {
 	opts := api.DefaultOptions()
 	typeOpts := reflect.TypeOf(opts)
 
@@ -444,36 +444,34 @@ func paramsToReader(params map[string][]string) (io.ReadSeeker, error) {
 
 	valueOpts := reflect.ValueOf(&opts).Elem()
 	// iterate params and set values based on json struct tags
-	for key, vals := range params {
+	for key, val := range params {
 		if opt, ok := jsonOpts[key]; ok {
 			field := valueOpts.FieldByName(opt.Name)
 			if field.IsValid() && field.CanSet() {
 				switch field.Kind() {
 				case reflect.Float32:
-					floatVal, err := strconv.ParseFloat(vals[0], 32)
+					floatVal, err := strconv.ParseFloat(val, 32)
 					if err != nil {
-						return nil, fmt.Errorf("invalid float value %s", vals)
+						return nil, fmt.Errorf("invalid float value %s", val)
 					}
 
 					field.SetFloat(floatVal)
 				case reflect.Int:
-					intVal, err := strconv.ParseInt(vals[0], 10, 0)
+					intVal, err := strconv.ParseInt(val, 10, 0)
 					if err != nil {
-						return nil, fmt.Errorf("invalid int value %s", vals)
+						return nil, fmt.Errorf("invalid int value %s", val)
 					}
 
 					field.SetInt(intVal)
 				case reflect.Bool:
-					boolVal, err := strconv.ParseBool(vals[0])
+					boolVal, err := strconv.ParseBool(val)
 					if err != nil {
-						return nil, fmt.Errorf("invalid bool value %s", vals)
+						return nil, fmt.Errorf("invalid bool value %s", val)
 					}
 
 					field.SetBool(boolVal)
 				case reflect.String:
-					field.SetString(vals[0])
-				case reflect.Slice:
-					field.Set(reflect.ValueOf(vals))
+					field.SetString(val)
 				default:
 					return nil, fmt.Errorf("unknown type %s for %s", field.Kind(), key)
 				}
