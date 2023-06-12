@@ -32,6 +32,7 @@ type Model struct {
 	ModelPath string
 	Template  string
 	System    string
+	Digest string
 	Options   api.Options
 }
 
@@ -135,6 +136,7 @@ func GetModel(name string) (*Model, error) {
 
 	model := &Model{
 		Name: mp.GetFullTagname(),
+		Digest: manifest.Config.Digest,
 	}
 
 	for _, layer := range manifest.Layers {
@@ -271,7 +273,19 @@ func CreateModel(name string, path string, fn func(resp api.ProgressResponse)) e
 					layers = append(layers, newLayer)
 				}
 			}
-		case "license", "template", "system", "prompt":
+		case "license":
+			fn(api.ProgressResponse{Status: fmt.Sprintf("creating model %s layer", c.Name)})
+			// remove the prompt layer if one exists
+			mediaType := fmt.Sprintf("application/vnd.ollama.image.%s", c.Name)
+
+			layer, err := CreateLayer(strings.NewReader(c.Args))
+			if err != nil {
+				return err
+			}
+
+			layer.MediaType = mediaType
+			layers = append(layers, layer)
+		case "template", "system", "prompt":
 			fn(api.ProgressResponse{Status: fmt.Sprintf("creating model %s layer", c.Name)})
 			// remove the prompt layer if one exists
 			mediaType := fmt.Sprintf("application/vnd.ollama.image.%s", c.Name)
@@ -590,6 +604,9 @@ func DeleteModel(name string) error {
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
 
 	if err != nil {
 		return err
@@ -635,9 +652,7 @@ func PushModel(name string, regOpts *RegistryOptions, fn func(api.ProgressRespon
 	}
 
 	var layers []*Layer
-	for _, layer := range manifest.Layers {
-		layers = append(layers, layer)
-	}
+	layers = append(layers, manifest.Layers...)
 	layers = append(layers, &manifest.Config)
 
 	for _, layer := range layers {
@@ -875,13 +890,10 @@ func checkBlobExistence(mp ModelPath, digest string, regOpts *RegistryOptions) (
 	return resp.StatusCode == http.StatusOK, nil
 }
 
-func uploadBlobChunked(mp ModelPath, location string, layer *Layer, regOpts *RegistryOptions, fn func(api.ProgressResponse)) error {
+func uploadBlobChunked(mp ModelPath, url string, layer *Layer, regOpts *RegistryOptions, fn func(api.ProgressResponse)) error {
 	// TODO allow resumability
 	// TODO allow canceling uploads via DELETE
 	// TODO allow cross repo blob mount
-
-	// Create URL
-	url := fmt.Sprintf("%s", location)
 
 	fp, err := GetBlobsPath(layer.Digest)
 	if err != nil {
@@ -931,7 +943,7 @@ func uploadBlobChunked(mp ModelPath, location string, layer *Layer, regOpts *Reg
 		// Check for success: For a successful upload, the Docker registry will respond with a 201 Created
 		if resp.StatusCode != http.StatusAccepted {
 			fn(api.ProgressResponse{
-				Status:    fmt.Sprintf("error uploading layer"),
+				Status:    "error uploading layer",
 				Digest:    layer.Digest,
 				Total:     int(layer.Size),
 				Completed: int(totalUploaded),

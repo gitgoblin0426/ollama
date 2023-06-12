@@ -10,9 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -262,12 +260,7 @@ func generate(cmd *cobra.Command, model, prompt string) error {
 			generateContext = []int{}
 		}
 
-		generateSession, ok := cmd.Context().Value(generateContextKey("session")).(int64)
-		if !ok {
-			generateSession = 0
-		}
-
-		request := api.GenerateRequest{Model: model, Prompt: prompt, Context: generateContext, SessionID: generateSession}
+		request := api.GenerateRequest{Model: model, Prompt: prompt, Context: generateContext}
 		fn := func(response api.GenerateResponse) error {
 			if !spinner.IsFinished() {
 				spinner.Finish()
@@ -297,7 +290,6 @@ func generate(cmd *cobra.Command, model, prompt string) error {
 
 		ctx := cmd.Context()
 		ctx = context.WithValue(ctx, generateContextKey("context"), latest.Context)
-		ctx = context.WithValue(ctx, generateContextKey("session"), latest.SessionID)
 		cmd.SetContext(ctx)
 	}
 
@@ -433,6 +425,7 @@ func generateInteractive(cmd *cobra.Command, model string) error {
 							usage()
 							continue
 						}
+
 					} else {
 						usage()
 						continue
@@ -526,54 +519,6 @@ func RunServer(_ *cobra.Command, _ []string) error {
 	return server.Serve(ln)
 }
 
-func startMacApp(client *api.Client) error {
-	exe, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	link, err := os.Readlink(exe)
-	if err != nil {
-		return err
-	}
-	if !strings.Contains(link, "Ollama.app") {
-		return fmt.Errorf("could not find ollama app")
-	}
-	path := strings.Split(link, "Ollama.app")
-	if err := exec.Command("/usr/bin/open", "-a", path[0]+"Ollama.app").Run(); err != nil {
-		return err
-	}
-	// wait for the server to start
-	timeout := time.After(5 * time.Second)
-	tick := time.Tick(500 * time.Millisecond)
-	for {
-		select {
-		case <-timeout:
-			return errors.New("timed out waiting for server to start")
-		case <-tick:
-			if err := client.Heartbeat(context.Background()); err == nil {
-				return nil // server has started
-			}
-		}
-	}
-}
-
-func checkServerHeartbeat(_ *cobra.Command, _ []string) error {
-	client := api.NewClient()
-	if err := client.Heartbeat(context.Background()); err != nil {
-		if !strings.Contains(err.Error(), "connection refused") {
-			return err
-		}
-		if runtime.GOOS == "darwin" {
-			if err := startMacApp(client); err != nil {
-				return fmt.Errorf("could not connect to ollama app, is it running?")
-			}
-		} else {
-			return fmt.Errorf("could not connect to ollama server, run 'ollama serve' to start it")
-		}
-	}
-	return nil
-}
-
 func NewCLI() *cobra.Command {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
@@ -589,21 +534,19 @@ func NewCLI() *cobra.Command {
 	cobra.EnableCommandSorting = false
 
 	createCmd := &cobra.Command{
-		Use:     "create MODEL",
-		Short:   "Create a model from a Modelfile",
-		Args:    cobra.MinimumNArgs(1),
-		PreRunE: checkServerHeartbeat,
-		RunE:    CreateHandler,
+		Use:   "create MODEL",
+		Short: "Create a model from a Modelfile",
+		Args:  cobra.MinimumNArgs(1),
+		RunE:  CreateHandler,
 	}
 
 	createCmd.Flags().StringP("file", "f", "Modelfile", "Name of the Modelfile (default \"Modelfile\")")
 
 	runCmd := &cobra.Command{
-		Use:     "run MODEL [PROMPT]",
-		Short:   "Run a model",
-		Args:    cobra.MinimumNArgs(1),
-		PreRunE: checkServerHeartbeat,
-		RunE:    RunHandler,
+		Use:   "run MODEL [PROMPT]",
+		Short: "Run a model",
+		Args:  cobra.MinimumNArgs(1),
+		RunE:  RunHandler,
 	}
 
 	runCmd.Flags().Bool("verbose", false, "Show timings for response")
@@ -616,21 +559,19 @@ func NewCLI() *cobra.Command {
 	}
 
 	pullCmd := &cobra.Command{
-		Use:     "pull MODEL",
-		Short:   "Pull a model from a registry",
-		Args:    cobra.MinimumNArgs(1),
-		PreRunE: checkServerHeartbeat,
-		RunE:    PullHandler,
+		Use:   "pull MODEL",
+		Short: "Pull a model from a registry",
+		Args:  cobra.MinimumNArgs(1),
+		RunE:  PullHandler,
 	}
 
 	pullCmd.Flags().Bool("insecure", false, "Use an insecure registry")
 
 	pushCmd := &cobra.Command{
-		Use:     "push MODEL",
-		Short:   "Push a model to a registry",
-		Args:    cobra.MinimumNArgs(1),
-		PreRunE: checkServerHeartbeat,
-		RunE:    PushHandler,
+		Use:   "push MODEL",
+		Short: "Push a model to a registry",
+		Args:  cobra.MinimumNArgs(1),
+		RunE:  PushHandler,
 	}
 
 	pushCmd.Flags().Bool("insecure", false, "Use an insecure registry")
@@ -639,24 +580,21 @@ func NewCLI() *cobra.Command {
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List models",
-		PreRunE: checkServerHeartbeat,
 		RunE:    ListHandler,
 	}
 
 	copyCmd := &cobra.Command{
-		Use:     "cp",
-		Short:   "Copy a model",
-		Args:    cobra.MinimumNArgs(2),
-		PreRunE: checkServerHeartbeat,
-		RunE:    CopyHandler,
+		Use:   "cp",
+		Short: "Copy a model",
+		Args:  cobra.MinimumNArgs(2),
+		RunE:  CopyHandler,
 	}
 
 	deleteCmd := &cobra.Command{
-		Use:     "rm",
-		Short:   "Remove a model",
-		Args:    cobra.MinimumNArgs(1),
-		PreRunE: checkServerHeartbeat,
-		RunE:    DeleteHandler,
+		Use:   "rm",
+		Short: "Remove a model",
+		Args:  cobra.MinimumNArgs(1),
+		RunE:  DeleteHandler,
 	}
 
 	rootCmd.AddCommand(

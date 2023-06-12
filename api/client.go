@@ -223,10 +223,3 @@ func (c *Client) Delete(ctx context.Context, req *DeleteRequest) error {
 	}
 	return nil
 }
-
-func (c *Client) Heartbeat(ctx context.Context) error {
-	if err := c.do(ctx, http.MethodHead, "/", nil, nil); err != nil {
-		return err
-	}
-	return nil
-}
