@@ -32,8 +32,7 @@ type Model struct {
 	ModelPath string
 	Template  string
 	System    string
-	Digest    string
-	Options   map[string]interface{}
+	Options   api.Options
 }
 
 func (m *Model) Prompt(request api.GenerateRequest) (string, error) {
@@ -135,8 +134,7 @@ func GetModel(name string) (*Model, error) {
 	}
 
 	model := &Model{
-		Name:   mp.GetFullTagname(),
-		Digest: manifest.Config.Digest,
+		Name: mp.GetFullTagname(),
 	}
 
 	for _, layer := range manifest.Layers {
@@ -176,10 +174,12 @@ func GetModel(name string) (*Model, error) {
 			}
 			defer params.Close()
 
-			// parse model options parameters into a map so that we can see which fields have been specified explicitly
-			if err = json.NewDecoder(params).Decode(&model.Options); err != nil {
+			var opts api.Options
+			if err = json.NewDecoder(params).Decode(&opts); err != nil {
 				return nil, err
 			}
+
+			model.Options = opts
 		}
 	}
 
@@ -271,19 +271,7 @@ func CreateModel(name string, path string, fn func(resp api.ProgressResponse)) e
 					layers = append(layers, newLayer)
 				}
 			}
-		case "license":
-			fn(api.ProgressResponse{Status: fmt.Sprintf("creating model %s layer", c.Name)})
-			// remove the prompt layer if one exists
-			mediaType := fmt.Sprintf("application/vnd.ollama.image.%s", c.Name)
-
-			layer, err := CreateLayer(strings.NewReader(c.Args))
-			if err != nil {
-				return err
-			}
-
-			layer.MediaType = mediaType
-			layers = append(layers, layer)
-		case "template", "system", "prompt":
+		case "license", "template", "system", "prompt":
 			fn(api.ProgressResponse{Status: fmt.Sprintf("creating model %s layer", c.Name)})
 			// remove the prompt layer if one exists
 			mediaType := fmt.Sprintf("application/vnd.ollama.image.%s", c.Name)
@@ -440,13 +428,11 @@ func GetLayerWithBufferFromLayer(layer *Layer) (*LayerReader, error) {
 	return newLayer, nil
 }
 
-// paramsToReader converts specified parameter options to their correct types, and returns a reader for the json
 func paramsToReader(params map[string][]string) (io.ReadSeeker, error) {
-	opts := api.Options{}
-	valueOpts := reflect.ValueOf(&opts).Elem() // names of the fields in the options struct
-	typeOpts := reflect.TypeOf(opts)           // types of the fields in the options struct
+	opts := api.DefaultOptions()
+	typeOpts := reflect.TypeOf(opts)
 
-	// build map of json struct tags to their types
+	// build map of json struct tags
 	jsonOpts := make(map[string]reflect.StructField)
 	for _, field := range reflect.VisibleFields(typeOpts) {
 		jsonTag := strings.Split(field.Tag.Get("json"), ",")[0]
@@ -455,7 +441,7 @@ func paramsToReader(params map[string][]string) (io.ReadSeeker, error) {
 		}
 	}
 
-	out := make(map[string]interface{})
+	valueOpts := reflect.ValueOf(&opts).Elem()
 	// iterate params and set values based on json struct tags
 	for key, vals := range params {
 		if opt, ok := jsonOpts[key]; ok {
@@ -468,26 +454,25 @@ func paramsToReader(params map[string][]string) (io.ReadSeeker, error) {
 						return nil, fmt.Errorf("invalid float value %s", vals)
 					}
 
-					out[key] = floatVal
+					field.SetFloat(floatVal)
 				case reflect.Int:
 					intVal, err := strconv.ParseInt(vals[0], 10, 0)
 					if err != nil {
 						return nil, fmt.Errorf("invalid int value %s", vals)
 					}
 
-					out[key] = intVal
+					field.SetInt(intVal)
 				case reflect.Bool:
 					boolVal, err := strconv.ParseBool(vals[0])
 					if err != nil {
 						return nil, fmt.Errorf("invalid bool value %s", vals)
 					}
 
-					out[key] = boolVal
+					field.SetBool(boolVal)
 				case reflect.String:
-					out[key] = vals[0]
+					field.SetString(vals[0])
 				case reflect.Slice:
-					// TODO: only string slices are supported right now
-					out[key] = vals
+					field.Set(reflect.ValueOf(vals))
 				default:
 					return nil, fmt.Errorf("unknown type %s for %s", field.Kind(), key)
 				}
@@ -495,7 +480,7 @@ func paramsToReader(params map[string][]string) (io.ReadSeeker, error) {
 		}
 	}
 
-	bts, err := json.Marshal(out)
+	bts, err := json.Marshal(opts)
 	if err != nil {
 		return nil, err
 	}
@@ -605,9 +590,6 @@ func DeleteModel(name string) error {
 		}
 		return nil
 	})
-	if err != nil {
-		return err
-	}
 
 	if err != nil {
 		return err
@@ -653,7 +635,9 @@ func PushModel(name string, regOpts *RegistryOptions, fn func(api.ProgressRespon
 	}
 
 	var layers []*Layer
-	layers = append(layers, manifest.Layers...)
+	for _, layer := range manifest.Layers {
+		layers = append(layers, layer)
+	}
 	layers = append(layers, &manifest.Config)
 
 	for _, layer := range layers {
@@ -891,10 +875,13 @@ func checkBlobExistence(mp ModelPath, digest string, regOpts *RegistryOptions) (
 	return resp.StatusCode == http.StatusOK, nil
 }
 
-func uploadBlobChunked(mp ModelPath, url string, layer *Layer, regOpts *RegistryOptions, fn func(api.ProgressResponse)) error {
+func uploadBlobChunked(mp ModelPath, location string, layer *Layer, regOpts *RegistryOptions, fn func(api.ProgressResponse)) error {
 	// TODO allow resumability
 	// TODO allow canceling uploads via DELETE
 	// TODO allow cross repo blob mount
+
+	// Create URL
+	url := fmt.Sprintf("%s", location)
 
 	fp, err := GetBlobsPath(layer.Digest)
 	if err != nil {
@@ -944,7 +931,7 @@ func uploadBlobChunked(mp ModelPath, url string, layer *Layer, regOpts *Registry
 		// Check for success: For a successful upload, the Docker registry will respond with a 201 Created
 		if resp.StatusCode != http.StatusAccepted {
 			fn(api.ProgressResponse{
-				Status:    "error uploading layer",
+				Status:    fmt.Sprintf("error uploading layer"),
 				Digest:    layer.Digest,
 				Total:     int(layer.Size),
 				Completed: int(totalUploaded),

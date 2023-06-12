@@ -3,12 +3,9 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"math"
 	"os"
-	"reflect"
 	"runtime"
-	"strings"
 	"time"
 )
 
@@ -33,11 +30,14 @@ func (e StatusError) Error() string {
 }
 
 type GenerateRequest struct {
+	SessionID       int64    `json:"session_id"`
+	SessionDuration Duration `json:"session_duration,omitempty"`
+
 	Model   string `json:"model"`
 	Prompt  string `json:"prompt"`
 	Context []int  `json:"context,omitempty"`
 
-	Options map[string]interface{} `json:"options"`
+	Options `json:"options"`
 }
 
 type CreateRequest struct {
@@ -86,6 +86,9 @@ type ListResponseModel struct {
 }
 
 type GenerateResponse struct {
+	SessionID        int64     `json:"session_id"`
+	SessionExpiresAt time.Time `json:"session_expires_at"`
+
 	Model     string    `json:"model"`
 	CreatedAt time.Time `json:"created_at"`
 	Response  string    `json:"response,omitempty"`
@@ -178,81 +181,6 @@ type Options struct {
 	Stop             []string `json:"stop,omitempty"`
 
 	NumThread int `json:"num_thread,omitempty"`
-}
-
-func (opts *Options) FromMap(m map[string]interface{}) error {
-	valueOpts := reflect.ValueOf(opts).Elem() // names of the fields in the options struct
-	typeOpts := reflect.TypeOf(opts).Elem()   // types of the fields in the options struct
-
-	// build map of json struct tags to their types
-	jsonOpts := make(map[string]reflect.StructField)
-	for _, field := range reflect.VisibleFields(typeOpts) {
-		jsonTag := strings.Split(field.Tag.Get("json"), ",")[0]
-		if jsonTag != "" {
-			jsonOpts[jsonTag] = field
-		}
-	}
-
-	for key, val := range m {
-		if opt, ok := jsonOpts[key]; ok {
-			field := valueOpts.FieldByName(opt.Name)
-			if field.IsValid() && field.CanSet() {
-				switch field.Kind() {
-				case reflect.Int:
-					// when JSON unmarshals numbers, it uses float64 by default, not int
-					val, ok := val.(float64)
-					if !ok {
-						log.Printf("could not convert model parmeter %v to int, skipped", key)
-						continue
-					}
-					field.SetInt(int64(val))
-				case reflect.Bool:
-					val, ok := val.(bool)
-					if !ok {
-						log.Printf("could not convert model parmeter %v to bool, skipped", key)
-						continue
-					}
-					field.SetBool(val)
-				case reflect.Float32:
-					// JSON unmarshals to float64
-					val, ok := val.(float64)
-					if !ok {
-						log.Printf("could not convert model parmeter %v to float32, skipped", key)
-						continue
-					}
-					field.SetFloat(val)
-				case reflect.String:
-					val, ok := val.(string)
-					if !ok {
-						log.Printf("could not convert model parmeter %v to string, skipped", key)
-						continue
-					}
-					field.SetString(val)
-				case reflect.Slice:
-					// JSON unmarshals to []interface{}, not []string
-					val, ok := val.([]interface{})
-					if !ok {
-						log.Printf("could not convert model parmeter %v to slice, skipped", key)
-						continue
-					}
-					// convert []interface{} to []string
-					slice := make([]string, len(val))
-					for i, item := range val {
-						str, ok := item.(string)
-						if !ok {
-							log.Printf("could not convert model parmeter %v to slice of strings, skipped", key)
-							continue
-						}
-						slice[i] = str
-					}
-					field.Set(reflect.ValueOf(slice))
-				default:
-					return fmt.Errorf("unknown type loading config params: %v", field.Kind())
-				}
-			}
-		}
-	}
-	return nil
 }
 
 func DefaultOptions() Options {
