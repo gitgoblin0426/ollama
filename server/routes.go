@@ -20,12 +20,14 @@ import (
 
 	"github.com/jmorganca/ollama/api"
 	"github.com/jmorganca/ollama/llama"
+	"github.com/jmorganca/ollama/vector"
 )
 
 var loaded struct {
 	mu sync.Mutex
 
-	llm *llama.LLM
+	llm        *llama.LLM
+	Embeddings []vector.Embedding
 
 	expireAt    time.Time
 	expireTimer *time.Timer
@@ -72,6 +74,11 @@ func GenerateHandler(c *gin.Context) {
 			loaded.digest = ""
 		}
 
+		if model.Embeddings != nil && len(model.Embeddings) > 0 {
+			opts.EmbeddingOnly = true // this is requried to generate embeddings, completions will still work
+			loaded.Embeddings = model.Embeddings
+		}
+
 		llm, err := llama.New(model.ModelPath, opts)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -82,7 +89,6 @@ func GenerateHandler(c *gin.Context) {
 		loaded.digest = model.Digest
 		loaded.options = opts
 	}
-
 	sessionDuration := 5 * time.Minute
 
 	loaded.expireAt = time.Now().Add(sessionDuration)
@@ -301,11 +307,11 @@ func CopyModelHandler(c *gin.Context) {
 	}
 }
 
-func Serve(ln net.Listener) error {
+func Serve(ln net.Listener, extraOrigins []string) error {
 	config := cors.DefaultConfig()
 	config.AllowWildcard = true
 	// only allow http/https from localhost
-	config.AllowOrigins = []string{
+	allowedOrigins := []string{
 		"http://localhost",
 		"http://localhost:*",
 		"https://localhost",
@@ -315,6 +321,8 @@ func Serve(ln net.Listener) error {
 		"https://127.0.0.1",
 		"https://127.0.0.1:*",
 	}
+	allowedOrigins = append(allowedOrigins, extraOrigins...)
+	config.AllowOrigins = allowedOrigins
 
 	r := gin.Default()
 	r.Use(cors.New(config))
