@@ -513,33 +513,23 @@ func generateBatch(cmd *cobra.Command, model string) error {
 	return nil
 }
 
-func RunServer(cmd *cobra.Command, _ []string) error {
-	host, err := cmd.Flags().GetString("host")
-	if err != nil {
-		return errors.New("host unset")
-	}
-	if os.Getenv("OLLAMA_HOST") != "" {
-		host = os.Getenv("OLLAMA_HOST")
-	}
-	port, err := cmd.Flags().GetString("port")
-	if err != nil {
-		return errors.New("port unset")
+func RunServer(_ *cobra.Command, _ []string) error {
+	host := os.Getenv("OLLAMA_HOST")
+	if host == "" {
+		host = "127.0.0.1"
 	}
 
-	if os.Getenv("OLLAMA_PORT") != "" {
-		port = os.Getenv("OLLAMA_PORT")
+	port := os.Getenv("OLLAMA_PORT")
+	if port == "" {
+		port = "11434"
 	}
 
 	ln, err := net.Listen("tcp", fmt.Sprintf("%s:%s", host, port))
 	if err != nil {
 		return err
 	}
-	extraOrigins, err := cmd.Flags().GetStringSlice("allowed-origins")
-	if err != nil {
-		return err
-	}
 
-	return server.Serve(ln, extraOrigins)
+	return server.Serve(ln)
 }
 
 func startMacApp(client *api.Client) error {
@@ -630,10 +620,6 @@ func NewCLI() *cobra.Command {
 		Short:   "Start ollama",
 		RunE:    RunServer,
 	}
-
-	serveCmd.Flags().String("port", "11434", "Port to listen on, may also use OLLAMA_PORT environment variable")
-	serveCmd.Flags().String("host", "127.0.0.1", "Host listen address, may also use OLLAMA_HOST environment variable")
-	serveCmd.Flags().StringSlice("allowed-origins", []string{}, "Additional allowed CORS origins (outside of localhost), specify as comma-separated list")
 
 	pullCmd := &cobra.Command{
 		Use:     "pull MODEL",
