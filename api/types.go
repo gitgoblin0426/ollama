@@ -266,7 +266,6 @@ func DefaultOptions() Options {
 		UseNUMA: false,
 
 		NumCtx:             2048,
-		NumKeep:            -1,
 		NumBatch:           512,
 		NumGPU:             1,
 		NumGQA:             1,
@@ -276,6 +275,7 @@ func DefaultOptions() Options {
 		UseMLock:           false,
 		RopeFrequencyBase:  10000.0,
 		RopeFrequencyScale: 1.0,
+		EmbeddingOnly:      true,
 
 		RepeatLastN:      64,
 		RepeatPenalty:    1.1,
