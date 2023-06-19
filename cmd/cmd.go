@@ -48,18 +48,12 @@ func CreateHandler(cmd *cobra.Command, args []string) error {
 				spinner.Stop()
 			}
 			currentDigest = resp.Digest
-			switch {
-			case strings.Contains(resp.Status, "embeddings"):
-				bar = progressbar.Default(int64(resp.Total), resp.Status)
-				bar.Set(resp.Completed)
-			default:
-				// pulling
-				bar = progressbar.DefaultBytes(
-					int64(resp.Total),
-					resp.Status,
-				)
-				bar.Set(resp.Completed)
-			}
+			bar = progressbar.DefaultBytes(
+				int64(resp.Total),
+				fmt.Sprintf("pulling %s...", resp.Digest[7:19]),
+			)
+
+			bar.Set(resp.Completed)
 		} else if resp.Digest == currentDigest && resp.Digest != "" {
 			bar.Set(resp.Completed)
 		} else {
