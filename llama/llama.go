@@ -1,4 +1,4 @@
-package llm
+package llama
 
 /*
 #cgo CPPFLAGS: -O3 -Wall -Wextra -Wno-unused-function -Wno-unused-variable -DNDEBUG -DGGML_USE_K_QUANTS
@@ -105,7 +105,7 @@ import (
 //go:embed ggml-metal.metal
 var fs embed.FS
 
-type llama struct {
+type LLM struct {
 	params *C.struct_llama_context_params
 	model  *C.struct_llama_model
 	ctx    *C.struct_llama_context
@@ -120,28 +120,12 @@ type llama struct {
 	api.Options
 }
 
-type llamaHyperparameters struct {
-	// NumVocab is the size of the model's vocabulary.
-	NumVocab uint32
-
-	// NumEmbd is the size of the model's embedding layer.
-	NumEmbd uint32
-	NumMult uint32
-	NumHead uint32
-
-	// NumLayer is the number of layers in the model.
-	NumLayer uint32
-	NumRot   uint32
-	// FileType describes the quantization level of the model, e.g. Q4_0, Q5_K, etc.
-	FileType
-}
-
-func newLlama(model string, adapters []string, opts api.Options) (*llama, error) {
+func New(model string, opts api.Options) (*LLM, error) {
 	if _, err := os.Stat(model); err != nil {
 		return nil, err
 	}
 
-	llm := llama{Options: opts}
+	llm := LLM{Options: opts}
 
 	C.llama_backend_init(C.bool(llm.UseNUMA))
 
@@ -161,12 +145,6 @@ func newLlama(model string, adapters []string, opts api.Options) (*llama, error)
 	params.embedding = C.bool(llm.EmbeddingOnly)
 	params.rope_freq_base = C.float(llm.RopeFrequencyBase)
 	params.rope_freq_scale = C.float(llm.RopeFrequencyScale)
-
-	if len(adapters) > 0 && llm.UseMMap {
-		log.Printf("must disable mmap to use lora adapters")
-		params.use_mmap = C.bool(false)
-	}
-
 	llm.params = &params
 
 	cModel := C.CString(model)
@@ -182,15 +160,6 @@ func newLlama(model string, adapters []string, opts api.Options) (*llama, error)
 		return nil, errors.New("failed to create context")
 	}
 
-	for _, adapter := range adapters {
-		cAdapter := C.CString(adapter)
-		defer C.free(unsafe.Pointer(cAdapter))
-
-		if retval := C.llama_model_apply_lora_from_file(llm.model, cAdapter, nil, C.int(llm.NumThread)); retval != 0 {
-			return nil, fmt.Errorf("failed to load adapter %s", adapter)
-		}
-	}
-
 	// warm up the model
 	bos := []C.llama_token{C.llama_token_bos()}
 	C.llama_eval(llm.ctx, unsafe.SliceData(bos), C.int(len(bos)), 0, C.int(opts.NumThread))
@@ -199,7 +168,7 @@ func newLlama(model string, adapters []string, opts api.Options) (*llama, error)
 	return &llm, nil
 }
 
-func (llm *llama) Close() {
+func (llm *LLM) Close() {
 	llm.gc = true
 
 	llm.mu.Lock()
@@ -211,16 +180,17 @@ func (llm *llama) Close() {
 	C.llama_print_timings(llm.ctx)
 }
 
-func (llm *llama) SetOptions(opts api.Options) {
-	llm.Options = opts
-}
-
 var errNeedMoreData = errors.New("need more data")
 
-func (llm *llama) Predict(ctx []int, prompt string, fn func(api.GenerateResponse)) error {
+func (llm *LLM) Predict(ctx []int, prompt string, fn func(api.GenerateResponse)) error {
 	C.llama_reset_timings(llm.ctx)
 
-	llm.marshalPrompt(ctx, prompt)
+	tokens := make([]C.llama_token, len(ctx))
+	for i := range tokens {
+		tokens[i] = C.llama_token(ctx[i])
+	}
+
+	llm.marshalPrompt(tokens, prompt)
 
 	C.llama_set_rng_seed(llm.ctx, C.uint(llm.Seed))
 
@@ -235,7 +205,7 @@ func (llm *llama) Predict(ctx []int, prompt string, fn func(api.GenerateResponse
 			return err
 		}
 
-		b.WriteString(llm.Decode(int(token)))
+		b.WriteString(llm.Decode(token))
 
 		if err := llm.checkStopConditions(b); err != nil {
 			if errors.Is(err, io.EOF) {
@@ -273,7 +243,7 @@ func (llm *llama) Predict(ctx []int, prompt string, fn func(api.GenerateResponse
 	return nil
 }
 
-func (llm *llama) checkStopConditions(b bytes.Buffer) error {
+func (llm *LLM) checkStopConditions(b bytes.Buffer) error {
 	for _, stopCondition := range llm.Stop {
 		if stopCondition == strings.TrimSpace(b.String()) {
 			return io.EOF
@@ -285,15 +255,10 @@ func (llm *llama) checkStopConditions(b bytes.Buffer) error {
 	return nil
 }
 
-func (llm *llama) marshalPrompt(ctx []int, prompt string) []C.llama_token {
+func (llm *LLM) marshalPrompt(ctx []C.llama_token, prompt string) []C.llama_token {
 	tokens := append(ctx, llm.Encode(prompt)...)
 	if llm.NumKeep < 0 {
 		llm.NumKeep = len(tokens)
-	}
-
-	cTokens := make([]C.llama_token, len(tokens))
-	for i := range tokens {
-		cTokens[i] = C.llama_token(tokens[i])
 	}
 
 	// min(llm.NumCtx - 4, llm.NumKeep)
@@ -304,25 +269,25 @@ func (llm *llama) marshalPrompt(ctx []int, prompt string) []C.llama_token {
 	if len(tokens) >= llm.NumCtx {
 		// truncate input
 		numLeft := (llm.NumCtx - llm.NumKeep) / 2
-		truncated := cTokens[:llm.NumKeep]
-		erasedBlocks := (len(cTokens) - llm.NumKeep - numLeft - 1) / numLeft
-		truncated = append(truncated, cTokens[llm.NumKeep+erasedBlocks*numLeft:]...)
-		copy(llm.last, cTokens[len(cTokens)-llm.NumCtx:])
+		truncated := tokens[:llm.NumKeep]
+		erasedBlocks := (len(tokens) - llm.NumKeep - numLeft - 1) / numLeft
+		truncated = append(truncated, tokens[llm.NumKeep+erasedBlocks*numLeft:]...)
+		copy(llm.last, tokens[len(tokens)-llm.NumCtx:])
 
-		cTokens = truncated
+		tokens = truncated
 		log.Printf("input truncated: num_ctx=%d num_keep=%d num_left=%d num_tokens=%d", llm.NumCtx, llm.NumKeep, numLeft, len(truncated))
 	} else {
-		llm.last = make([]C.llama_token, llm.NumCtx-len(cTokens))
-		llm.last = append(llm.last, cTokens...)
+		llm.last = make([]C.llama_token, llm.NumCtx-len(tokens))
+		llm.last = append(llm.last, tokens...)
 	}
 
 	var i int
-	for i = 0; i < len(llm.embd) && i < len(cTokens) && llm.embd[i] == cTokens[i]; i++ {
+	for i = 0; i < len(llm.embd) && i < len(tokens) && llm.embd[i] == tokens[i]; i++ {
 		// noop
 	}
 
-	llm.embd = cTokens
-	if i == len(cTokens) {
+	llm.embd = tokens
+	if i == len(tokens) {
 		// evaluate at least one token to generate logits
 		i--
 	}
@@ -330,36 +295,31 @@ func (llm *llama) marshalPrompt(ctx []int, prompt string) []C.llama_token {
 	llm.cursor = i
 
 	log.Printf("prompt: num_past=%d cached=%v eval=%v", i, len(llm.embd[:i]), len(llm.embd[i:]))
-	return cTokens
+	return tokens
 }
 
-func (llm *llama) Encode(prompt string) []int {
+func (llm *LLM) Encode(prompt string) []C.llama_token {
 	cPrompt := C.CString(prompt)
 	defer C.free(unsafe.Pointer(cPrompt))
 
-	cTokens := make([]C.llama_token, len(prompt)+1)
-	if n := C.llama_tokenize(llm.ctx, cPrompt, unsafe.SliceData(cTokens), C.int(len(cTokens)), true); n > 0 {
-		tokens := make([]int, n)
-		for i := range cTokens[:n] {
-			tokens[i] = int(cTokens[i])
-		}
-
-		return tokens
+	tokens := make([]C.llama_token, len(prompt)+1)
+	if n := C.llama_tokenize(llm.ctx, cPrompt, unsafe.SliceData(tokens), C.int(len(tokens)), true); n > 0 {
+		return tokens[:n]
 	}
 
 	return nil
 }
 
-func (llm *llama) Decode(tokens ...int) string {
+func (llm *LLM) Decode(tokens ...C.llama_token) string {
 	var sb strings.Builder
 	for _, token := range tokens {
-		sb.WriteString(C.GoString(C.llama_token_to_str(llm.ctx, C.llama_token(token))))
+		sb.WriteString(C.GoString(C.llama_token_to_str(llm.ctx, token)))
 	}
 
 	return sb.String()
 }
 
-func (llm *llama) next() (C.llama_token, error) {
+func (llm *LLM) next() (C.llama_token, error) {
 	llm.mu.Lock()
 	defer llm.mu.Unlock()
 
@@ -450,7 +410,7 @@ func (llm *llama) next() (C.llama_token, error) {
 	return token, nil
 }
 
-func (llm *llama) Embedding(input string) ([]float64, error) {
+func (llm *LLM) Embedding(input string) ([]float64, error) {
 	if !llm.EmbeddingOnly {
 		return nil, errors.New("llama: embedding not enabled")
 	}
@@ -460,12 +420,7 @@ func (llm *llama) Embedding(input string) ([]float64, error) {
 		return nil, errors.New("llama: tokenize embedding")
 	}
 
-	cTokens := make([]C.llama_token, len(tokens))
-	for i := range tokens {
-		cTokens[i] = C.llama_token(tokens[i])
-	}
-
-	retval := C.llama_eval(llm.ctx, unsafe.SliceData(cTokens), C.int(len(tokens)), 0, C.int(llm.NumThread))
+	retval := C.llama_eval(llm.ctx, unsafe.SliceData(tokens), C.int(len(tokens)), 0, C.int(llm.NumThread))
 	if retval != 0 {
 		return nil, errors.New("llama: eval")
 	}

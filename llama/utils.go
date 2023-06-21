@@ -1,4 +1,4 @@
-package llm
+package llama
 
 import (
 	"fmt"

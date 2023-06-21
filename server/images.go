@@ -19,7 +19,7 @@ import (
 	"strings"
 
 	"github.com/jmorganca/ollama/api"
-	"github.com/jmorganca/ollama/llm"
+	"github.com/jmorganca/ollama/llama"
 	"github.com/jmorganca/ollama/parser"
 	"github.com/jmorganca/ollama/vector"
 )
@@ -31,14 +31,13 @@ type RegistryOptions struct {
 }
 
 type Model struct {
-	Name         string `json:"name"`
-	ModelPath    string
-	AdapterPaths []string
-	Template     string
-	System       string
-	Digest       string
-	Options      map[string]interface{}
-	Embeddings   []vector.Embedding
+	Name       string `json:"name"`
+	ModelPath  string
+	Template   string
+	System     string
+	Digest     string
+	Options    map[string]interface{}
+	Embeddings []vector.Embedding
 }
 
 func (m *Model) Prompt(request api.GenerateRequest, embedding string) (string, error) {
@@ -99,14 +98,9 @@ type LayerReader struct {
 }
 
 type ConfigV2 struct {
-	ModelFamily llm.ModelFamily `json:"model_family"`
-	ModelType   llm.ModelType   `json:"model_type"`
-	FileType    llm.FileType    `json:"file_type"`
-	RootFS      RootFS          `json:"rootfs"`
-
-	// required by spec
 	Architecture string `json:"architecture"`
 	OS           string `json:"os"`
+	RootFS       RootFS `json:"rootfs"`
 }
 
 type RootFS struct {
@@ -179,8 +173,6 @@ func GetModel(name string) (*Model, error) {
 			if err = json.NewDecoder(file).Decode(&model.Embeddings); err != nil {
 				return nil, err
 			}
-		case "application/vnd.ollama.image.adapter":
-			model.AdapterPaths = append(model.AdapterPaths, filename)
 		case "application/vnd.ollama.image.template":
 			bts, err := os.ReadFile(filename)
 			if err != nil {
@@ -253,11 +245,6 @@ func CreateModel(ctx context.Context, name string, path string, fn func(resp api
 		return err
 	}
 
-	config := ConfigV2{
-		Architecture: "amd64",
-		OS:           "linux",
-	}
-
 	var layers []*LayerReader
 	params := make(map[string][]string)
 	embed := EmbeddingParams{fn: fn, opts: api.DefaultOptions()}
@@ -296,18 +283,6 @@ func CreateModel(ctx context.Context, name string, path string, fn func(resp api
 					}
 					defer file.Close()
 
-					ggml, err := llm.DecodeGGML(file, llm.ModelFamilyLlama)
-					if err != nil {
-						return err
-					}
-
-					config.ModelFamily = ggml.ModelFamily
-					config.ModelType = ggml.ModelType
-					config.FileType = ggml.FileType
-
-					// reset the file
-					file.Seek(0, io.SeekStart)
-
 					l, err := CreateLayer(file)
 					if err != nil {
 						return fmt.Errorf("failed to create layer: %v", err)
@@ -316,7 +291,6 @@ func CreateModel(ctx context.Context, name string, path string, fn func(resp api
 					layers = append(layers, l)
 				}
 			}
-
 			if mf != nil {
 				log.Printf("manifest = %#v", mf)
 				for _, l := range mf.Layers {
@@ -333,40 +307,6 @@ func CreateModel(ctx context.Context, name string, path string, fn func(resp api
 				return err
 			}
 			embed.files = append(embed.files, embedFilePath)
-		case "adapter":
-			fn(api.ProgressResponse{Status: fmt.Sprintf("creating model %s layer", c.Name)})
-
-			fp := c.Args
-			if strings.HasPrefix(fp, "~/") {
-				parts := strings.Split(fp, "/")
-				home, err := os.UserHomeDir()
-				if err != nil {
-					return fmt.Errorf("failed to open file: %v", err)
-				}
-
-				fp = filepath.Join(home, filepath.Join(parts[1:]...))
-			}
-
-			// If filePath is not an absolute path, make it relative to the modelfile path
-			if !filepath.IsAbs(fp) {
-				fp = filepath.Join(filepath.Dir(path), fp)
-			}
-
-			// create a model from this specified file
-			fn(api.ProgressResponse{Status: "creating model layer"})
-
-			file, err := os.Open(fp)
-			if err != nil {
-				return fmt.Errorf("failed to open file: %v", err)
-			}
-			defer file.Close()
-
-			l, err := CreateLayer(file)
-			if err != nil {
-				return fmt.Errorf("failed to create layer: %v", err)
-			}
-			l.MediaType = "application/vnd.ollama.image.adapter"
-			layers = append(layers, l)
 		case "license":
 			fn(api.ProgressResponse{Status: fmt.Sprintf("creating model %s layer", c.Name)})
 			mediaType := fmt.Sprintf("application/vnd.ollama.image.%s", c.Name)
@@ -380,7 +320,7 @@ func CreateModel(ctx context.Context, name string, path string, fn func(resp api
 			layers = append(layers, layer)
 		case "template", "system", "prompt":
 			fn(api.ProgressResponse{Status: fmt.Sprintf("creating model %s layer", c.Name)})
-			// remove the layer if one exists
+			// remove the prompt layer if one exists
 			mediaType := fmt.Sprintf("application/vnd.ollama.image.%s", c.Name)
 			layers = removeLayerFromLayers(layers, mediaType)
 
@@ -442,7 +382,7 @@ func CreateModel(ctx context.Context, name string, path string, fn func(resp api
 
 	// Create a layer for the config object
 	fn(api.ProgressResponse{Status: "creating config layer"})
-	cfg, err := createConfigLayer(config, digests)
+	cfg, err := createConfigLayer(digests)
 	if err != nil {
 		return err
 	}
@@ -489,13 +429,13 @@ func embeddingLayers(e EmbeddingParams) ([]*LayerReader, error) {
 		}
 
 		e.opts.EmbeddingOnly = true
-		llmModel, err := llm.New(e.model, []string{}, e.opts)
+		llm, err := llama.New(e.model, e.opts)
 		if err != nil {
 			return nil, fmt.Errorf("load model to generate embeddings: %v", err)
 		}
 		defer func() {
-			if llmModel != nil {
-				llmModel.Close()
+			if llm != nil {
+				llm.Close()
 			}
 		}()
 
@@ -539,7 +479,7 @@ func embeddingLayers(e EmbeddingParams) ([]*LayerReader, error) {
 						Total:     len(data) - 1,
 						Completed: i,
 					})
-					embed, err := llmModel.Embedding(d)
+					embed, err := llm.Embedding(d)
 					if err != nil {
 						log.Printf("failed to generate embedding for '%s' line %d: %v", filePath, i+1, err)
 						continue
@@ -735,7 +675,7 @@ func getLayerDigests(layers []*LayerReader) ([]string, error) {
 // CreateLayer creates a Layer object from a given file
 func CreateLayer(f io.ReadSeeker) (*LayerReader, error) {
 	digest, size := GetSHA256Digest(f)
-	f.Seek(0, io.SeekStart)
+	f.Seek(0, 0)
 
 	layer := &LayerReader{
 		Layer: Layer{
@@ -823,6 +763,10 @@ func DeleteModel(name string) error {
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+
 	if err != nil {
 		return err
 	}
@@ -1025,10 +969,15 @@ func pullModelManifest(mp ModelPath, regOpts *RegistryOptions) (*ManifestV2, err
 	return m, err
 }
 
-func createConfigLayer(config ConfigV2, layers []string) (*LayerReader, error) {
-	config.RootFS = RootFS{
-		Type:    "layers",
-		DiffIDs: layers,
+func createConfigLayer(layers []string) (*LayerReader, error) {
+	// TODO change architecture and OS
+	config := ConfigV2{
+		Architecture: "arm64",
+		OS:           "linux",
+		RootFS: RootFS{
+			Type:    "layers",
+			DiffIDs: layers,
+		},
 	}
 
 	configJSON, err := json.Marshal(config)

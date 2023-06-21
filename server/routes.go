@@ -21,14 +21,14 @@ import (
 	"gonum.org/v1/gonum/mat"
 
 	"github.com/jmorganca/ollama/api"
-	"github.com/jmorganca/ollama/llm"
+	"github.com/jmorganca/ollama/llama"
 	"github.com/jmorganca/ollama/vector"
 )
 
 var loaded struct {
 	mu sync.Mutex
 
-	llm        llm.LLM
+	llm        *llama.LLM
 	Embeddings []vector.Embedding
 
 	expireAt    time.Time
@@ -63,15 +63,10 @@ func load(model *Model, reqOpts map[string]interface{}, sessionDuration time.Dur
 			loaded.Embeddings = model.Embeddings
 		}
 
-		llmModel, err := llm.New(model.ModelPath, model.AdapterPaths, opts)
+		llm, err := llama.New(model.ModelPath, opts)
 		if err != nil {
 			return err
 		}
-
-		// set cache values before modifying opts
-		loaded.llm = llmModel
-		loaded.digest = model.Digest
-		loaded.options = opts
 
 		if opts.NumKeep < 0 {
 			promptWithSystem, err := model.Prompt(api.GenerateRequest{}, "")
@@ -84,13 +79,15 @@ func load(model *Model, reqOpts map[string]interface{}, sessionDuration time.Dur
 				return err
 			}
 
-			tokensWithSystem := llmModel.Encode(promptWithSystem)
-			tokensNoSystem := llmModel.Encode(promptNoSystem)
+			tokensWithSystem := llm.Encode(promptWithSystem)
+			tokensNoSystem := llm.Encode(promptNoSystem)
 
-			opts.NumKeep = len(tokensWithSystem) - len(tokensNoSystem) + 1
-
-			llmModel.SetOptions(opts)
+			llm.NumKeep = len(tokensWithSystem) - len(tokensNoSystem) + 1
 		}
+
+		loaded.llm = llm
+		loaded.digest = model.Digest
+		loaded.options = opts
 	}
 	loaded.expireAt = time.Now().Add(sessionDuration)
 
@@ -394,10 +391,10 @@ func CopyModelHandler(c *gin.Context) {
 	}
 }
 
-func Serve(ln net.Listener, extraOrigins []string) error {
+func Serve(ln net.Listener, origins []string) error {
 	config := cors.DefaultConfig()
 	config.AllowWildcard = true
-	allowedOrigins := []string{
+	config.AllowOrigins = append(origins, []string{
 		"http://localhost",
 		"http://localhost:*",
 		"https://localhost",
@@ -410,9 +407,7 @@ func Serve(ln net.Listener, extraOrigins []string) error {
 		"http://0.0.0.0:*",
 		"https://0.0.0.0",
 		"https://0.0.0.0:*",
-	}
-	allowedOrigins = append(allowedOrigins, extraOrigins...)
-	config.AllowOrigins = allowedOrigins
+	}...)
 
 	r := gin.Default()
 	r.Use(cors.New(config))
