@@ -1,10 +1,12 @@
-# privateGPT with Llama 2 Uncensored
+# PrivateGPT with Llama 2 uncensored
 
-> Note: this example is a slightly modified version of PrivateGPT using models such as Llama 2 Uncensored. All credit for PrivateGPT goes to Iván Martínez who is the creator of it, and you can find his GitHub repo [here](https://github.com/imartinez/privateGPT).
+https://github.com/jmorganca/ollama/assets/3325447/20cf8ec6-ff25-42c6-bdd8-9be594e3ce1b
+
+> Note: this example is a simplified version of [PrivateGPT](https://github.com/imartinez/privateGPT) that works with Llama 2 Uncensored. All credit for PrivateGPT goes to Iván Martínez who is the creator of it.
 
 ### Setup
 
-Set up a virtual environment (optional):
+Optionally set up a virtual environment:
 
 ```
 python3 -m venv .venv
@@ -23,14 +25,14 @@ Pull the model you'd like to use:
 ollama pull llama2-uncensored
 ```
 
-### Getting WeWork's latest quarterly report
+### Getting WeWork's latest quarterly earnings report (10-Q)
 
 ```
 mkdir source_documents
-curl https://d18rn0p25nwr6d.cloudfront.net/CIK-0001813756/975b3e9b-268e-4798-a9e4-2a9a7c92dc10.pdf  -o source_documents/wework.pdf
+curl https://d18rn0p25nwr6d.cloudfront.net/CIK-0001813756/975b3e9b-268e-4798-a9e4-2a9a7c92dc10.pdf -o source_documents/wework.pdf
 ```
 
-### Ingesting files
+### Ingesting data
 
 ```shell
 python ingest.py
@@ -49,7 +51,7 @@ Using embedded DuckDB with persistence: data will be stored in: db
 Ingestion complete! You can now run privateGPT.py to query your documents
 ```
 
-### Ask questions
+### Ask Questions!
 
 ```shell
 python privateGPT.py
@@ -67,7 +69,7 @@ ollama pull llama2:13b
 MODEL=llama2:13b python privateGPT.py
 ```
 
-## Adding more files
+## Adding your own data
 
 Put any and all your files into the `source_documents` directory
 
