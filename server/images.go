@@ -13,7 +13,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -95,7 +94,6 @@ type Layer struct {
 	MediaType string `json:"mediaType"`
 	Digest    string `json:"digest"`
 	Size      int    `json:"size"`
-	From      string `json:"from,omitempty"`
 }
 
 type LayerReader struct {
@@ -272,8 +270,7 @@ func CreateModel(ctx context.Context, name string, path string, fn func(resp api
 		case "model":
 			fn(api.ProgressResponse{Status: "looking for model"})
 			embed.model = c.Args
-			mp := ParseModelPath(c.Args)
-			mf, err := GetManifest(mp)
+			mf, err := GetManifest(ParseModelPath(c.Args))
 			if err != nil {
 				modelFile, err := filenameWithPath(path, c.Args)
 				if err != nil {
@@ -330,7 +327,6 @@ func CreateModel(ctx context.Context, name string, path string, fn func(resp api
 					if err != nil {
 						return err
 					}
-					newLayer.From = mp.GetNamespaceRepository()
 					layers = append(layers, newLayer)
 				}
 			}
@@ -455,7 +451,8 @@ func CreateModel(ctx context.Context, name string, path string, fn func(resp api
 	}
 	layers = append(layers, cfg)
 
-	if err := SaveLayers(layers, fn, false); err != nil {
+	err = SaveLayers(layers, fn, false)
+	if err != nil {
 		return err
 	}
 
@@ -899,24 +896,14 @@ func PushModel(ctx context.Context, name string, regOpts *RegistryOptions, fn fu
 			Total:  layer.Size,
 		})
 
-		location, err := startUpload(ctx, mp, layer, regOpts)
+		location, err := startUpload(ctx, mp, regOpts)
 		if err != nil {
 			log.Printf("couldn't start upload: %v", err)
 			return err
 		}
 
-		if strings.HasPrefix(path.Base(location), "sha256:") {
-			layer.Digest = path.Base(location)
-			fn(api.ProgressResponse{
-				Status:    "using existing layer",
-				Digest:    layer.Digest,
-				Total:     layer.Size,
-				Completed: layer.Size,
-			})
-			continue
-		}
-
-		if err := uploadBlobChunked(ctx, mp, location, layer, regOpts, fn); err != nil {
+		err = uploadBlobChunked(ctx, mp, location, layer, regOpts, fn)
+		if err != nil {
 			log.Printf("error uploading blob: %v", err)
 			return err
 		}
@@ -1076,11 +1063,8 @@ func GetSHA256Digest(r io.Reader) (string, int) {
 	return fmt.Sprintf("sha256:%x", h.Sum(nil)), int(n)
 }
 
-func startUpload(ctx context.Context, mp ModelPath, layer *Layer, regOpts *RegistryOptions) (string, error) {
+func startUpload(ctx context.Context, mp ModelPath, regOpts *RegistryOptions) (string, error) {
 	url := fmt.Sprintf("%s/v2/%s/blobs/uploads/", mp.Registry, mp.GetNamespaceRepository())
-	if layer.From != "" {
-		url = fmt.Sprintf("%s/v2/%s/blobs/uploads/?mount=%s&from=%s", mp.Registry, mp.GetNamespaceRepository(), layer.Digest, layer.From)
-	}
 
 	resp, err := makeRequest(ctx, "POST", url, nil, nil, regOpts)
 	if err != nil {
@@ -1090,7 +1074,7 @@ func startUpload(ctx context.Context, mp ModelPath, layer *Layer, regOpts *Regis
 	defer resp.Body.Close()
 
 	// Check for success
-	if resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusCreated {
+	if resp.StatusCode != http.StatusAccepted {
 		body, _ := io.ReadAll(resp.Body)
 		return "", fmt.Errorf("on upload registry responded with code %d: %s", resp.StatusCode, body)
 	}
