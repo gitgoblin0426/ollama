@@ -42,17 +42,6 @@ type GenerateRequest struct {
 	Options map[string]interface{} `json:"options"`
 }
 
-type EmbeddingRequest struct {
-	Model  string `json:"model"`
-	Prompt string `json:"prompt"`
-
-	Options map[string]interface{} `json:"options"`
-}
-
-type EmbeddingResponse struct {
-	Embedding []float64 `json:"embedding"`
-}
-
 type CreateRequest struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
@@ -96,10 +85,6 @@ type ListResponseModel struct {
 	Name       string    `json:"name"`
 	ModifiedAt time.Time `json:"modified_at"`
 	Size       int       `json:"size"`
-}
-
-type TokenResponse struct {
-	Token string `json:"token"`
 }
 
 type GenerateResponse struct {
@@ -218,19 +203,17 @@ func (opts *Options) FromMap(m map[string]interface{}) error {
 			if field.IsValid() && field.CanSet() {
 				switch field.Kind() {
 				case reflect.Int:
-					switch t := val.(type) {
-					case int64:
-						field.SetInt(t)
-					case float64:
-						// when JSON unmarshals numbers, it uses float64, not int
-						field.SetInt(int64(t))
-					default:
-						log.Printf("could not convert model parameter %v to int, skipped", key)
+					// when JSON unmarshals numbers, it uses float64 by default, not int
+					val, ok := val.(float64)
+					if !ok {
+						log.Printf("could not convert model parmeter %v to int, skipped", key)
+						continue
 					}
+					field.SetInt(int64(val))
 				case reflect.Bool:
 					val, ok := val.(bool)
 					if !ok {
-						log.Printf("could not convert model parameter %v to bool, skipped", key)
+						log.Printf("could not convert model parmeter %v to bool, skipped", key)
 						continue
 					}
 					field.SetBool(val)
@@ -238,14 +221,14 @@ func (opts *Options) FromMap(m map[string]interface{}) error {
 					// JSON unmarshals to float64
 					val, ok := val.(float64)
 					if !ok {
-						log.Printf("could not convert model parameter %v to float32, skipped", key)
+						log.Printf("could not convert model parmeter %v to float32, skipped", key)
 						continue
 					}
 					field.SetFloat(val)
 				case reflect.String:
 					val, ok := val.(string)
 					if !ok {
-						log.Printf("could not convert model parameter %v to string, skipped", key)
+						log.Printf("could not convert model parmeter %v to string, skipped", key)
 						continue
 					}
 					field.SetString(val)
@@ -253,7 +236,7 @@ func (opts *Options) FromMap(m map[string]interface{}) error {
 					// JSON unmarshals to []interface{}, not []string
 					val, ok := val.([]interface{})
 					if !ok {
-						log.Printf("could not convert model parameter %v to slice, skipped", key)
+						log.Printf("could not convert model parmeter %v to slice, skipped", key)
 						continue
 					}
 					// convert []interface{} to []string
@@ -261,7 +244,7 @@ func (opts *Options) FromMap(m map[string]interface{}) error {
 					for i, item := range val {
 						str, ok := item.(string)
 						if !ok {
-							log.Printf("could not convert model parameter %v to slice of strings, skipped", key)
+							log.Printf("could not convert model parmeter %v to slice of strings, skipped", key)
 							continue
 						}
 						slice[i] = str

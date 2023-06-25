@@ -1,6 +1,6 @@
 # Examples
 
-This directory contains different examples of using Ollama
+This directory contains examples that can be created and run with `ollama`.
 
 To create a model:
 
