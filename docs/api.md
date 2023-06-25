@@ -8,6 +8,7 @@
 - [Copy a model](#copy-a-model)
 - [Delete a model](#delete-a-model)
 - [Pull a model](#pull-a-model)
+- [Generate embeddings](#generate-embeddings)
 
 ## Conventions
 
@@ -37,6 +38,7 @@ Advanced parameters:
 - `options`: additional model parameters listed in the documentation for the [Modelfile](./modelfile.md#valid-parameters-and-values) such as `temperature`
 - `system`: system prompt to (overrides what is defined in the `Modelfile`)
 - `template`: the full prompt or prompt template (overrides what is defined in the `Modelfile`)
+- `context`: the context parameter returned from a previous request to `/generate`, this can be used to keep a short conversational memory
 
 ### Request
 
@@ -70,6 +72,7 @@ The final response in the stream also includes additional data about the generat
 - `prompt_eval_duration`: time spent in nanoseconds evaluating the prompt
 - `eval_count`: number of tokens the response
 - `eval_duration`: time in nanoseconds spent generating the response
+- `context`: an encoding of the conversation used in this response, this can be sent in the next request to keep a conversational memory
 
 To calculate how fast the response is generated in tokens per second (token/s), divide `eval_count` / `eval_duration`.
 
@@ -77,6 +80,7 @@ To calculate how fast the response is generated in tokens per second (token/s), 
 {
   "model": "llama2:7b",
   "created_at": "2023-08-04T19:22:45.499127Z",
+  "context": [1, 2, 3],
   "done": true,
   "total_duration": 5589157167,
   "load_duration": 3013701500,
@@ -218,5 +222,38 @@ curl -X POST http://localhost:11434/api/pull -d '{
   "status": "downloading digestname",
   "digest": "digestname",
   "total": 2142590208
+}
+```
+
+## Generate Embeddings
+
+```
+POST /api/embeddings
+```
+
+Generate embeddings from a model
+
+### Parameters
+
+- `model`: name of model to generate embeddings from
+- `prompt`: text to generate embeddings for
+
+### Request
+
+```
+curl -X POST http://localhost:11434/api/embeddings -d '{
+  "model": "llama2:7b",
+  "prompt": "Here is an article about llamas..."
+}'
+```
+
+### Response
+
+```json
+{
+  "embeddings": [
+    0.5670403838157654, 0.009260174818336964, 0.23178744316101074, -0.2916173040866852, -0.8924556970596313,
+    0.8785552978515625, -0.34576427936553955, 0.5742510557174683, -0.04222835972905159, -0.137906014919281
+  ]
 }
 ```

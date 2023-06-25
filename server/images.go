@@ -11,7 +11,6 @@ import (
 	"html/template"
 	"io"
 	"log"
-	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -20,25 +19,29 @@ import (
 	"strings"
 
 	"github.com/jmorganca/ollama/api"
-	"github.com/jmorganca/ollama/llama"
+	"github.com/jmorganca/ollama/llm"
 	"github.com/jmorganca/ollama/parser"
 	"github.com/jmorganca/ollama/vector"
 )
+
+const MaxRetries = 3
 
 type RegistryOptions struct {
 	Insecure bool
 	Username string
 	Password string
+	Token    string
 }
 
 type Model struct {
-	Name       string `json:"name"`
-	ModelPath  string
-	Template   string
-	System     string
-	Digest     string
-	Options    map[string]interface{}
-	Embeddings []vector.Embedding
+	Name         string `json:"name"`
+	ModelPath    string
+	AdapterPaths []string
+	Template     string
+	System       string
+	Digest       string
+	Options      map[string]interface{}
+	Embeddings   []vector.Embedding
 }
 
 func (m *Model) Prompt(request api.GenerateRequest, embedding string) (string, error) {
@@ -99,9 +102,14 @@ type LayerReader struct {
 }
 
 type ConfigV2 struct {
+	ModelFamily llm.ModelFamily `json:"model_family"`
+	ModelType   llm.ModelType   `json:"model_type"`
+	FileType    llm.FileType    `json:"file_type"`
+	RootFS      RootFS          `json:"rootfs"`
+
+	// required by spec
 	Architecture string `json:"architecture"`
 	OS           string `json:"os"`
-	RootFS       RootFS `json:"rootfs"`
 }
 
 type RootFS struct {
@@ -174,6 +182,8 @@ func GetModel(name string) (*Model, error) {
 			if err = json.NewDecoder(file).Decode(&model.Embeddings); err != nil {
 				return nil, err
 			}
+		case "application/vnd.ollama.image.adapter":
+			model.AdapterPaths = append(model.AdapterPaths, filename)
 		case "application/vnd.ollama.image.template":
 			bts, err := os.ReadFile(filename)
 			if err != nil {
@@ -246,6 +256,11 @@ func CreateModel(ctx context.Context, name string, path string, fn func(resp api
 		return err
 	}
 
+	config := ConfigV2{
+		Architecture: "amd64",
+		OS:           "linux",
+	}
+
 	var layers []*LayerReader
 	params := make(map[string][]string)
 	embed := EmbeddingParams{fn: fn, opts: api.DefaultOptions()}
@@ -284,6 +299,18 @@ func CreateModel(ctx context.Context, name string, path string, fn func(resp api
 					}
 					defer file.Close()
 
+					ggml, err := llm.DecodeGGML(file, llm.ModelFamilyLlama)
+					if err != nil {
+						return err
+					}
+
+					config.ModelFamily = ggml.ModelFamily
+					config.ModelType = ggml.ModelType
+					config.FileType = ggml.FileType
+
+					// reset the file
+					file.Seek(0, io.SeekStart)
+
 					l, err := CreateLayer(file)
 					if err != nil {
 						return fmt.Errorf("failed to create layer: %v", err)
@@ -292,6 +319,7 @@ func CreateModel(ctx context.Context, name string, path string, fn func(resp api
 					layers = append(layers, l)
 				}
 			}
+
 			if mf != nil {
 				log.Printf("manifest = %#v", mf)
 				for _, l := range mf.Layers {
@@ -308,6 +336,40 @@ func CreateModel(ctx context.Context, name string, path string, fn func(resp api
 				return err
 			}
 			embed.files = append(embed.files, embedFilePath)
+		case "adapter":
+			fn(api.ProgressResponse{Status: fmt.Sprintf("creating model %s layer", c.Name)})
+
+			fp := c.Args
+			if strings.HasPrefix(fp, "~/") {
+				parts := strings.Split(fp, "/")
+				home, err := os.UserHomeDir()
+				if err != nil {
+					return fmt.Errorf("failed to open file: %v", err)
+				}
+
+				fp = filepath.Join(home, filepath.Join(parts[1:]...))
+			}
+
+			// If filePath is not an absolute path, make it relative to the modelfile path
+			if !filepath.IsAbs(fp) {
+				fp = filepath.Join(filepath.Dir(path), fp)
+			}
+
+			// create a model from this specified file
+			fn(api.ProgressResponse{Status: "creating model layer"})
+
+			file, err := os.Open(fp)
+			if err != nil {
+				return fmt.Errorf("failed to open file: %v", err)
+			}
+			defer file.Close()
+
+			l, err := CreateLayer(file)
+			if err != nil {
+				return fmt.Errorf("failed to create layer: %v", err)
+			}
+			l.MediaType = "application/vnd.ollama.image.adapter"
+			layers = append(layers, l)
 		case "license":
 			fn(api.ProgressResponse{Status: fmt.Sprintf("creating model %s layer", c.Name)})
 			mediaType := fmt.Sprintf("application/vnd.ollama.image.%s", c.Name)
@@ -321,7 +383,7 @@ func CreateModel(ctx context.Context, name string, path string, fn func(resp api
 			layers = append(layers, layer)
 		case "template", "system", "prompt":
 			fn(api.ProgressResponse{Status: fmt.Sprintf("creating model %s layer", c.Name)})
-			// remove the prompt layer if one exists
+			// remove the layer if one exists
 			mediaType := fmt.Sprintf("application/vnd.ollama.image.%s", c.Name)
 			layers = removeLayerFromLayers(layers, mediaType)
 
@@ -383,7 +445,7 @@ func CreateModel(ctx context.Context, name string, path string, fn func(resp api
 
 	// Create a layer for the config object
 	fn(api.ProgressResponse{Status: "creating config layer"})
-	cfg, err := createConfigLayer(digests)
+	cfg, err := createConfigLayer(config, digests)
 	if err != nil {
 		return err
 	}
@@ -430,13 +492,13 @@ func embeddingLayers(e EmbeddingParams) ([]*LayerReader, error) {
 		}
 
 		e.opts.EmbeddingOnly = true
-		llm, err := llama.New(e.model, e.opts)
+		llmModel, err := llm.New(e.model, []string{}, e.opts)
 		if err != nil {
 			return nil, fmt.Errorf("load model to generate embeddings: %v", err)
 		}
 		defer func() {
-			if llm != nil {
-				llm.Close()
+			if llmModel != nil {
+				llmModel.Close()
 			}
 		}()
 
@@ -480,31 +542,10 @@ func embeddingLayers(e EmbeddingParams) ([]*LayerReader, error) {
 						Total:     len(data) - 1,
 						Completed: i,
 					})
-					retry := 0
-				generate:
-					if retry > 3 {
+					embed, err := llmModel.Embedding(d)
+					if err != nil {
 						log.Printf("failed to generate embedding for '%s' line %d: %v", filePath, i+1, err)
 						continue
-					}
-					embed, err := llm.Embedding(d)
-					if err != nil {
-						log.Printf("retrying embedding generation for '%s' line %d: %v", filePath, i+1, err)
-						retry++
-						goto generate
-					}
-					// Check for NaN and Inf in the embedding, which can't be stored
-					for _, value := range embed {
-						if math.IsNaN(value) || math.IsInf(value, 0) {
-							log.Printf("reloading model, embedding contains NaN or Inf")
-							// reload the model to get a new embedding, the seed can effect these outputs and reloading changes it
-							llm.Close()
-							llm, err = llama.New(e.model, e.opts)
-							if err != nil {
-								return nil, fmt.Errorf("load model to generate embeddings: %v", err)
-							}
-							retry++
-							goto generate
-						}
 					}
 					embeddings = append(embeddings, vector.Embedding{Data: d, Vector: embed})
 				}
@@ -697,7 +738,7 @@ func getLayerDigests(layers []*LayerReader) ([]string, error) {
 // CreateLayer creates a Layer object from a given file
 func CreateLayer(f io.ReadSeeker) (*LayerReader, error) {
 	digest, size := GetSHA256Digest(f)
-	f.Seek(0, 0)
+	f.Seek(0, io.SeekStart)
 
 	layer := &LayerReader{
 		Layer: Layer{
@@ -789,10 +830,6 @@ func DeleteModel(name string) error {
 		return err
 	}
 
-	if err != nil {
-		return err
-	}
-
 	// only delete the files which are still in the deleteMap
 	for k, v := range deleteMap {
 		if v {
@@ -821,7 +858,7 @@ func DeleteModel(name string) error {
 	return nil
 }
 
-func PushModel(name string, regOpts *RegistryOptions, fn func(api.ProgressResponse)) error {
+func PushModel(ctx context.Context, name string, regOpts *RegistryOptions, fn func(api.ProgressResponse)) error {
 	mp := ParseModelPath(name)
 
 	fn(api.ProgressResponse{Status: "retrieving manifest"})
@@ -837,7 +874,7 @@ func PushModel(name string, regOpts *RegistryOptions, fn func(api.ProgressRespon
 	layers = append(layers, &manifest.Config)
 
 	for _, layer := range layers {
-		exists, err := checkBlobExistence(mp, layer.Digest, regOpts)
+		exists, err := checkBlobExistence(ctx, mp, layer.Digest, regOpts)
 		if err != nil {
 			return err
 		}
@@ -859,13 +896,13 @@ func PushModel(name string, regOpts *RegistryOptions, fn func(api.ProgressRespon
 			Total:  layer.Size,
 		})
 
-		location, err := startUpload(mp, regOpts)
+		location, err := startUpload(ctx, mp, regOpts)
 		if err != nil {
 			log.Printf("couldn't start upload: %v", err)
 			return err
 		}
 
-		err = uploadBlobChunked(mp, location, layer, regOpts, fn)
+		err = uploadBlobChunked(ctx, mp, location, layer, regOpts, fn)
 		if err != nil {
 			log.Printf("error uploading blob: %v", err)
 			return err
@@ -883,7 +920,7 @@ func PushModel(name string, regOpts *RegistryOptions, fn func(api.ProgressRespon
 		return err
 	}
 
-	resp, err := makeRequest("PUT", url, headers, bytes.NewReader(manifestJSON), regOpts)
+	resp, err := makeRequest(ctx, "PUT", url, headers, bytes.NewReader(manifestJSON), regOpts)
 	if err != nil {
 		return err
 	}
@@ -905,7 +942,7 @@ func PullModel(ctx context.Context, name string, regOpts *RegistryOptions, fn fu
 
 	fn(api.ProgressResponse{Status: "pulling manifest"})
 
-	manifest, err := pullModelManifest(mp, regOpts)
+	manifest, err := pullModelManifest(ctx, mp, regOpts)
 	if err != nil {
 		return fmt.Errorf("pull model manifest: %s", err)
 	}
@@ -961,13 +998,13 @@ func PullModel(ctx context.Context, name string, regOpts *RegistryOptions, fn fu
 	return nil
 }
 
-func pullModelManifest(mp ModelPath, regOpts *RegistryOptions) (*ManifestV2, error) {
+func pullModelManifest(ctx context.Context, mp ModelPath, regOpts *RegistryOptions) (*ManifestV2, error) {
 	url := fmt.Sprintf("%s/v2/%s/manifests/%s", mp.Registry, mp.GetNamespaceRepository(), mp.Tag)
 	headers := map[string]string{
 		"Accept": "application/vnd.docker.distribution.manifest.v2+json",
 	}
 
-	resp, err := makeRequest("GET", url, headers, nil, regOpts)
+	resp, err := makeRequest(ctx, "GET", url, headers, nil, regOpts)
 	if err != nil {
 		log.Printf("couldn't get manifest: %v", err)
 		return nil, err
@@ -991,15 +1028,10 @@ func pullModelManifest(mp ModelPath, regOpts *RegistryOptions) (*ManifestV2, err
 	return m, err
 }
 
-func createConfigLayer(layers []string) (*LayerReader, error) {
-	// TODO change architecture and OS
-	config := ConfigV2{
-		Architecture: "arm64",
-		OS:           "linux",
-		RootFS: RootFS{
-			Type:    "layers",
-			DiffIDs: layers,
-		},
+func createConfigLayer(config ConfigV2, layers []string) (*LayerReader, error) {
+	config.RootFS = RootFS{
+		Type:    "layers",
+		DiffIDs: layers,
 	}
 
 	configJSON, err := json.Marshal(config)
@@ -1031,10 +1063,10 @@ func GetSHA256Digest(r io.Reader) (string, int) {
 	return fmt.Sprintf("sha256:%x", h.Sum(nil)), int(n)
 }
 
-func startUpload(mp ModelPath, regOpts *RegistryOptions) (string, error) {
+func startUpload(ctx context.Context, mp ModelPath, regOpts *RegistryOptions) (string, error) {
 	url := fmt.Sprintf("%s/v2/%s/blobs/uploads/", mp.Registry, mp.GetNamespaceRepository())
 
-	resp, err := makeRequest("POST", url, nil, nil, regOpts)
+	resp, err := makeRequest(ctx, "POST", url, nil, nil, regOpts)
 	if err != nil {
 		log.Printf("couldn't start upload: %v", err)
 		return "", err
@@ -1057,10 +1089,10 @@ func startUpload(mp ModelPath, regOpts *RegistryOptions) (string, error) {
 }
 
 // Function to check if a blob already exists in the Docker registry
-func checkBlobExistence(mp ModelPath, digest string, regOpts *RegistryOptions) (bool, error) {
+func checkBlobExistence(ctx context.Context, mp ModelPath, digest string, regOpts *RegistryOptions) (bool, error) {
 	url := fmt.Sprintf("%s/v2/%s/blobs/%s", mp.Registry, mp.GetNamespaceRepository(), digest)
 
-	resp, err := makeRequest("HEAD", url, nil, nil, regOpts)
+	resp, err := makeRequest(ctx, "HEAD", url, nil, nil, regOpts)
 	if err != nil {
 		log.Printf("couldn't check for blob: %v", err)
 		return false, err
@@ -1071,7 +1103,7 @@ func checkBlobExistence(mp ModelPath, digest string, regOpts *RegistryOptions) (
 	return resp.StatusCode == http.StatusOK, nil
 }
 
-func uploadBlobChunked(mp ModelPath, url string, layer *Layer, regOpts *RegistryOptions, fn func(api.ProgressResponse)) error {
+func uploadBlobChunked(ctx context.Context, mp ModelPath, url string, layer *Layer, regOpts *RegistryOptions, fn func(api.ProgressResponse)) error {
 	// TODO allow resumability
 	// TODO allow canceling uploads via DELETE
 	// TODO allow cross repo blob mount
@@ -1128,7 +1160,7 @@ func uploadBlobChunked(mp ModelPath, url string, layer *Layer, regOpts *Registry
 	headers["Content-Length"] = strconv.Itoa(int(layer.Size))
 
 	// finish the upload
-	resp, err := makeRequest("PUT", url, headers, r, regOpts)
+	resp, err := makeRequest(ctx, "PUT", url, headers, r, regOpts)
 	if err != nil {
 		log.Printf("couldn't finish upload: %v", err)
 		return err
@@ -1142,7 +1174,16 @@ func uploadBlobChunked(mp ModelPath, url string, layer *Layer, regOpts *Registry
 	return nil
 }
 
-func makeRequest(method, url string, headers map[string]string, body io.Reader, regOpts *RegistryOptions) (*http.Response, error) {
+func makeRequest(ctx context.Context, method, url string, headers map[string]string, body io.Reader, regOpts *RegistryOptions) (*http.Response, error) {
+	retryCtx := ctx.Value("retries")
+	var retries int
+	var ok bool
+	if retries, ok = retryCtx.(int); ok {
+		if retries > MaxRetries {
+			return nil, fmt.Errorf("Maximum retries hit; are you sure you have access to this resource?")
+		}
+	}
+
 	if !strings.HasPrefix(url, "http") {
 		if regOpts.Insecure {
 			url = "http://" + url
@@ -1151,18 +1192,30 @@ func makeRequest(method, url string, headers map[string]string, body io.Reader, 
 		}
 	}
 
-	req, err := http.NewRequest(method, url, body)
+	// make a copy of the body in case we need to try the call to makeRequest again
+	var buf bytes.Buffer
+	if body != nil {
+		_, err := io.Copy(&buf, body)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	bodyCopy := bytes.NewReader(buf.Bytes())
+
+	req, err := http.NewRequest(method, url, bodyCopy)
 	if err != nil {
 		return nil, err
 	}
 
-	for k, v := range headers {
-		req.Header.Set(k, v)
+	if regOpts.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+regOpts.Token)
+	} else if regOpts.Username != "" && regOpts.Password != "" {
+		req.SetBasicAuth(regOpts.Username, regOpts.Password)
 	}
 
-	// TODO: better auth
-	if regOpts.Username != "" && regOpts.Password != "" {
-		req.SetBasicAuth(regOpts.Username, regOpts.Password)
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
 
 	client := &http.Client{
@@ -1179,7 +1232,54 @@ func makeRequest(method, url string, headers map[string]string, body io.Reader, 
 		return nil, err
 	}
 
+	// if the request is unauthenticated, try to authenticate and make the request again
+	if resp.StatusCode == http.StatusUnauthorized {
+		auth := resp.Header.Get("Www-Authenticate")
+		authRedir := ParseAuthRedirectString(string(auth))
+		token, err := getAuthToken(ctx, authRedir, regOpts)
+		if err != nil {
+			return nil, err
+		}
+		regOpts.Token = token
+		bodyCopy = bytes.NewReader(buf.Bytes())
+		ctx = context.WithValue(ctx, "retries", retries+1)
+		return makeRequest(ctx, method, url, headers, bodyCopy, regOpts)
+	}
+
 	return resp, nil
+}
+
+func getValue(header, key string) string {
+	startIdx := strings.Index(header, key+"=")
+	if startIdx == -1 {
+		return ""
+	}
+
+	// Move the index to the starting quote after the key.
+	startIdx += len(key) + 2
+	endIdx := startIdx
+
+	for endIdx < len(header) {
+		if header[endIdx] == '"' {
+			if endIdx+1 < len(header) && header[endIdx+1] != ',' { // If the next character isn't a comma, continue
+				endIdx++
+				continue
+			}
+			break
+		}
+		endIdx++
+	}
+	return header[startIdx:endIdx]
+}
+
+func ParseAuthRedirectString(authStr string) AuthRedirect {
+	authStr = strings.TrimPrefix(authStr, "Bearer ")
+
+	return AuthRedirect{
+		Realm:   getValue(authStr, "realm"),
+		Service: getValue(authStr, "service"),
+		Scope:   getValue(authStr, "scope"),
+	}
 }
 
 var errDigestMismatch = fmt.Errorf("digest mismatch, file must be downloaded again")

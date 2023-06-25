@@ -21,14 +21,14 @@ import (
 	"gonum.org/v1/gonum/mat"
 
 	"github.com/jmorganca/ollama/api"
-	"github.com/jmorganca/ollama/llama"
+	"github.com/jmorganca/ollama/llm"
 	"github.com/jmorganca/ollama/vector"
 )
 
 var loaded struct {
 	mu sync.Mutex
 
-	llm        *llama.LLM
+	llm        llm.LLM
 	Embeddings []vector.Embedding
 
 	expireAt    time.Time
@@ -36,6 +36,84 @@ var loaded struct {
 
 	digest  string
 	options api.Options
+}
+
+// load a model into memory if it is not already loaded, it is up to the caller to lock loaded.mu before calling this function
+func load(model *Model, reqOpts map[string]interface{}, sessionDuration time.Duration) error {
+	opts := api.DefaultOptions()
+	if err := opts.FromMap(model.Options); err != nil {
+		log.Printf("could not load model options: %v", err)
+		return err
+	}
+
+	if err := opts.FromMap(reqOpts); err != nil {
+		log.Printf("could not merge model options: %v", err)
+		return err
+	}
+
+	if model.Digest != loaded.digest || !reflect.DeepEqual(loaded.options, opts) {
+		if loaded.llm != nil {
+			loaded.llm.Close()
+			loaded.llm = nil
+			loaded.digest = ""
+		}
+
+		if model.Embeddings != nil && len(model.Embeddings) > 0 {
+			opts.EmbeddingOnly = true // this is requried to generate embeddings, completions will still work
+			loaded.Embeddings = model.Embeddings
+		}
+
+		llmModel, err := llm.New(model.ModelPath, model.AdapterPaths, opts)
+		if err != nil {
+			return err
+		}
+
+		// set cache values before modifying opts
+		loaded.llm = llmModel
+		loaded.digest = model.Digest
+		loaded.options = opts
+
+		if opts.NumKeep < 0 {
+			promptWithSystem, err := model.Prompt(api.GenerateRequest{}, "")
+			if err != nil {
+				return err
+			}
+
+			promptNoSystem, err := model.Prompt(api.GenerateRequest{Context: []int{0}}, "")
+			if err != nil {
+				return err
+			}
+
+			tokensWithSystem := llmModel.Encode(promptWithSystem)
+			tokensNoSystem := llmModel.Encode(promptNoSystem)
+
+			opts.NumKeep = len(tokensWithSystem) - len(tokensNoSystem) + 1
+
+			llmModel.SetOptions(opts)
+		}
+	}
+	loaded.expireAt = time.Now().Add(sessionDuration)
+
+	if loaded.expireTimer == nil {
+		loaded.expireTimer = time.AfterFunc(sessionDuration, func() {
+			loaded.mu.Lock()
+			defer loaded.mu.Unlock()
+
+			if time.Now().Before(loaded.expireAt) {
+				return
+			}
+
+			if loaded.llm == nil {
+				return
+			}
+
+			loaded.llm.Close()
+			loaded.llm = nil
+			loaded.digest = ""
+		})
+	}
+	loaded.expireTimer.Reset(sessionDuration)
+	return nil
 }
 
 func GenerateHandler(c *gin.Context) {
@@ -56,82 +134,11 @@ func GenerateHandler(c *gin.Context) {
 		return
 	}
 
-	opts := api.DefaultOptions()
-	if err := opts.FromMap(model.Options); err != nil {
-		log.Printf("could not load model options: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	if err := opts.FromMap(req.Options); err != nil {
-		log.Printf("could not merge model options: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	if model.Digest != loaded.digest || !reflect.DeepEqual(loaded.options, opts) {
-		if loaded.llm != nil {
-			loaded.llm.Close()
-			loaded.llm = nil
-			loaded.digest = ""
-		}
-
-		if model.Embeddings != nil && len(model.Embeddings) > 0 {
-			opts.EmbeddingOnly = true // this is requried to generate embeddings, completions will still work
-			loaded.Embeddings = model.Embeddings
-		}
-
-		llm, err := llama.New(model.ModelPath, opts)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-
-		if opts.NumKeep < 0 {
-			promptWithSystem, err := model.Prompt(api.GenerateRequest{}, "")
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-
-			promptNoSystem, err := model.Prompt(api.GenerateRequest{Context: []int{0}}, "")
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-
-			tokensWithSystem := llm.Encode(promptWithSystem)
-			tokensNoSystem := llm.Encode(promptNoSystem)
-
-			llm.NumKeep = len(tokensWithSystem) - len(tokensNoSystem) + 1
-		}
-
-		loaded.llm = llm
-		loaded.digest = model.Digest
-		loaded.options = opts
-	}
 	sessionDuration := 5 * time.Minute
-
-	loaded.expireAt = time.Now().Add(sessionDuration)
-	if loaded.expireTimer == nil {
-		loaded.expireTimer = time.AfterFunc(sessionDuration, func() {
-			loaded.mu.Lock()
-			defer loaded.mu.Unlock()
-
-			if time.Now().Before(loaded.expireAt) {
-				return
-			}
-
-			if loaded.llm == nil {
-				return
-			}
-
-			loaded.llm.Close()
-			loaded.llm = nil
-			loaded.digest = ""
-		})
+	if err := load(model, req.Options, sessionDuration); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
 	}
-	loaded.expireTimer.Reset(sessionDuration)
 
 	checkpointLoaded := time.Now()
 
@@ -179,6 +186,44 @@ func GenerateHandler(c *gin.Context) {
 	}()
 
 	streamResponse(c, ch)
+}
+
+func EmbeddingHandler(c *gin.Context) {
+	loaded.mu.Lock()
+	defer loaded.mu.Unlock()
+
+	var req api.EmbeddingRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	model, err := GetModel(req.Model)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := load(model, req.Options, 5*time.Minute); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if !loaded.options.EmbeddingOnly {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "embedding option must be set to true"})
+		return
+	}
+
+	embedding, err := loaded.llm.Embedding(req.Prompt)
+	if err != nil {
+		log.Printf("embedding generation failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate embedding"})
+		return
+	}
+
+	resp := api.EmbeddingResponse{
+		Embedding: embedding,
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 func PullModelHandler(c *gin.Context) {
@@ -232,7 +277,8 @@ func PushModelHandler(c *gin.Context) {
 			Password: req.Password,
 		}
 
-		if err := PushModel(req.Name, regOpts, fn); err != nil {
+		ctx := context.Background()
+		if err := PushModel(ctx, req.Name, regOpts, fn); err != nil {
 			ch <- gin.H{"error": err.Error()}
 		}
 	}()
@@ -349,10 +395,10 @@ func CopyModelHandler(c *gin.Context) {
 	}
 }
 
-func Serve(ln net.Listener, extraOrigins []string) error {
+func Serve(ln net.Listener, origins []string) error {
 	config := cors.DefaultConfig()
 	config.AllowWildcard = true
-	allowedOrigins := []string{
+	config.AllowOrigins = append(origins, []string{
 		"http://localhost",
 		"http://localhost:*",
 		"https://localhost",
@@ -365,9 +411,7 @@ func Serve(ln net.Listener, extraOrigins []string) error {
 		"http://0.0.0.0:*",
 		"https://0.0.0.0",
 		"https://0.0.0.0:*",
-	}
-	allowedOrigins = append(allowedOrigins, extraOrigins...)
-	config.AllowOrigins = allowedOrigins
+	}...)
 
 	r := gin.Default()
 	r.Use(cors.New(config))
@@ -381,6 +425,7 @@ func Serve(ln net.Listener, extraOrigins []string) error {
 
 	r.POST("/api/pull", PullModelHandler)
 	r.POST("/api/generate", GenerateHandler)
+	r.POST("/api/embeddings", EmbeddingHandler)
 	r.POST("/api/create", CreateModelHandler)
 	r.POST("/api/push", PushModelHandler)
 	r.POST("/api/copy", CopyModelHandler)

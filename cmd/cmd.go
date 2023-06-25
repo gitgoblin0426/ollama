@@ -3,6 +3,9 @@ package cmd
 import (
 	"bufio"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -20,6 +24,7 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
+	"golang.org/x/crypto/ssh"
 
 	"github.com/jmorganca/ollama/api"
 	"github.com/jmorganca/ollama/format"
@@ -318,12 +323,16 @@ func generate(cmd *cobra.Command, model, prompt string) error {
 
 func showLayer(l *server.Layer) {
 	filename, err := server.GetBlobsPath(l.Digest)
-	bts, err := os.ReadFile(filename)
 	if err != nil {
-		fmt.Printf("Couldn't read layer")
+		fmt.Println("Couldn't get layer's path")
 		return
 	}
-	fmt.Printf(string(bts) + "\n")
+	bts, err := os.ReadFile(filename)
+	if err != nil {
+		fmt.Println("Couldn't read layer")
+		return
+	}
+	fmt.Println(string(bts))
 }
 
 func generateInteractive(cmd *cobra.Command, model string) error {
@@ -460,7 +469,7 @@ func generateInteractive(cmd *cobra.Command, model string) error {
 				mp := server.ParseModelPath(model)
 				manifest, err := server.GetManifest(mp)
 				if err != nil {
-					fmt.Printf("error: couldn't get a manifestfor this model")
+					fmt.Println("error: couldn't get a manifest for this model")
 					continue
 				}
 				switch args[1] {
@@ -519,34 +528,24 @@ func generateBatch(cmd *cobra.Command, model string) error {
 	return nil
 }
 
-// getRunServerParams takes a command and the environment variables and returns the correct params
-// given the order of precedence: command line args (highest), environment variables, defaults (lowest)
-func getRunServerParams(cmd *cobra.Command) (host, port string, extraOrigins []string, err error) {
-	host = os.Getenv("OLLAMA_HOST")
-	hostFlag := cmd.Flags().Lookup("host")
-	if hostFlag == nil {
-		return "", "", nil, errors.New("host unset")
-	}
-	if hostFlag.Changed || host == "" {
-		host = hostFlag.Value.String()
-	}
-	port = os.Getenv("OLLAMA_PORT")
-	portFlag := cmd.Flags().Lookup("port")
-	if portFlag == nil {
-		return "", "", nil, errors.New("port unset")
-	}
-	if portFlag.Changed || port == "" {
-		port = portFlag.Value.String()
-	}
-	extraOrigins, err = cmd.Flags().GetStringSlice("allowed-origins")
-	if err != nil {
-		return "", "", nil, err
-	}
-	return host, port, extraOrigins, nil
-}
-
 func RunServer(cmd *cobra.Command, _ []string) error {
-	host, port, extraOrigins, err := getRunServerParams(cmd)
+	var host, port = "127.0.0.1", "11434"
+
+	parts := strings.Split(os.Getenv("OLLAMA_HOST"), ":")
+	if ip := net.ParseIP(parts[0]); ip != nil {
+		host = ip.String()
+	}
+
+	if len(parts) > 1 {
+		port = parts[1]
+	}
+
+	// deprecated: include port in OLLAMA_HOST
+	if p := os.Getenv("OLLAMA_PORT"); p != "" {
+		port = p
+	}
+
+	err := initializeKeypair()
 	if err != nil {
 		return err
 	}
@@ -556,7 +555,61 @@ func RunServer(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	return server.Serve(ln, extraOrigins)
+	var origins []string
+	if o := os.Getenv("OLLAMA_ORIGINS"); o != "" {
+		origins = strings.Split(o, ",")
+	}
+
+	return server.Serve(ln, origins)
+}
+
+func initializeKeypair() error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+
+	privKeyPath := filepath.Join(home, ".ollama", "id_ed25519")
+	pubKeyPath := filepath.Join(home, ".ollama", "id_ed25519.pub")
+
+	_, err = os.Stat(privKeyPath)
+	if os.IsNotExist(err) {
+		fmt.Printf("Couldn't find '%s'. Generating new private key.\n", privKeyPath)
+		_, privKey, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			return err
+		}
+
+		privKeyBytes, err := format.OpenSSHPrivateKey(privKey, "")
+		if err != nil {
+			return err
+		}
+
+		err = os.MkdirAll(path.Dir(privKeyPath), 0o700)
+		if err != nil {
+			return fmt.Errorf("could not create directory %w", err)
+		}
+
+		err = os.WriteFile(privKeyPath, pem.EncodeToMemory(privKeyBytes), 0600)
+		if err != nil {
+			return err
+		}
+
+		sshPrivateKey, err := ssh.NewSignerFromKey(privKey)
+		if err != nil {
+			return err
+		}
+
+		pubKeyData := ssh.MarshalAuthorizedKey(sshPrivateKey.PublicKey())
+
+		err = os.WriteFile(pubKeyPath, pubKeyData, 0644)
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("Your new public key is: \n\n%s\n", string(pubKeyData))
+	}
+	return nil
 }
 
 func startMacApp(client *api.Client) error {
@@ -647,10 +700,6 @@ func NewCLI() *cobra.Command {
 		Short:   "Start ollama",
 		RunE:    RunServer,
 	}
-
-	serveCmd.Flags().String("port", "11434", "Port to listen on, may also use OLLAMA_PORT environment variable")
-	serveCmd.Flags().String("host", "127.0.0.1", "Host listen address, may also use OLLAMA_HOST environment variable")
-	serveCmd.Flags().StringSlice("allowed-origins", []string{}, "Additional allowed CORS origins (outside of localhost), specify as comma-separated list")
 
 	pullCmd := &cobra.Command{
 		Use:     "pull MODEL",
