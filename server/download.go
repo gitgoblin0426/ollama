@@ -113,7 +113,6 @@ var chunkSize = 1024 * 1024 // 1 MiB in bytes
 
 // doDownload downloads a blob from the registry and stores it in the blobs directory
 func doDownload(ctx context.Context, mp ModelPath, regOpts *RegistryOptions, f *FileDownload, fn func(api.ProgressResponse)) error {
-	defer inProgress.Delete(f.Digest)
 	var size int64
 
 	fi, err := os.Stat(f.FilePath + "-partial")
@@ -208,6 +207,8 @@ outerLoop:
 
 		inProgress.Store(f.Digest, f)
 	}
+
+	inProgress.Delete(f.Digest)
 
 	log.Printf("success getting %s\n", f.Digest)
 	return nil
