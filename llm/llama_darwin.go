@@ -39,7 +39,6 @@ func initBackend() error {
 		if err != nil {
 			return err
 		}
-		defer actual.Close()
 
 		actualSum := sha256.New()
 		if _, err := io.Copy(actualSum, actual); err != nil {
