@@ -25,27 +25,17 @@ type FileDownload struct {
 
 var inProgress sync.Map // map of digests currently being downloaded to their current download progress
 
-type downloadOpts struct {
-	mp      ModelPath
-	digest  string
-	regOpts *RegistryOptions
-	fn      func(api.ProgressResponse)
-	retry   int // track the number of retries on this download
-}
-
-const maxRetry = 3
-
 // downloadBlob downloads a blob from the registry and stores it in the blobs directory
-func downloadBlob(ctx context.Context, opts downloadOpts) error {
-	fp, err := GetBlobsPath(opts.digest)
+func downloadBlob(ctx context.Context, mp ModelPath, digest string, regOpts *RegistryOptions, fn func(api.ProgressResponse)) error {
+	fp, err := GetBlobsPath(digest)
 	if err != nil {
 		return err
 	}
 
 	if fi, _ := os.Stat(fp); fi != nil {
 		// we already have the file, so return
-		opts.fn(api.ProgressResponse{
-			Digest:    opts.digest,
+		fn(api.ProgressResponse{
+			Digest:    digest,
 			Total:     int(fi.Size()),
 			Completed: int(fi.Size()),
 		})
@@ -54,33 +44,24 @@ func downloadBlob(ctx context.Context, opts downloadOpts) error {
 	}
 
 	fileDownload := &FileDownload{
-		Digest:    opts.digest,
+		Digest:    digest,
 		FilePath:  fp,
 		Total:     1, // dummy value to indicate that we don't know the total size yet
 		Completed: 0,
 	}
 
-	_, downloading := inProgress.LoadOrStore(opts.digest, fileDownload)
+	_, downloading := inProgress.LoadOrStore(digest, fileDownload)
 	if downloading {
 		// this is another client requesting the server to download the same blob concurrently
-		return monitorDownload(ctx, opts, fileDownload)
+		return monitorDownload(ctx, mp, regOpts, fileDownload, fn)
 	}
-	if err := doDownload(ctx, opts, fileDownload); err != nil {
-		if errors.Is(err, errDownload) && opts.retry < maxRetry {
-			opts.retry++
-			log.Print(err)
-			log.Printf("retrying download of %s", opts.digest)
-			return downloadBlob(ctx, opts)
-		}
-		return err
-	}
-	return nil
+	return doDownload(ctx, mp, regOpts, fileDownload, fn)
 }
 
 var downloadMu sync.Mutex // mutex to check to resume a download while monitoring
 
 // monitorDownload monitors the download progress of a blob and resumes it if it is interrupted
-func monitorDownload(ctx context.Context, opts downloadOpts, f *FileDownload) error {
+func monitorDownload(ctx context.Context, mp ModelPath, regOpts *RegistryOptions, f *FileDownload, fn func(api.ProgressResponse)) error {
 	tick := time.NewTicker(time.Second)
 	for range tick.C {
 		done, resume, err := func() (bool, bool, error) {
@@ -91,7 +72,7 @@ func monitorDownload(ctx context.Context, opts downloadOpts, f *FileDownload) er
 				// check once again if the download is complete
 				if fi, _ := os.Stat(f.FilePath); fi != nil {
 					// successful download while monitoring
-					opts.fn(api.ProgressResponse{
+					fn(api.ProgressResponse{
 						Digest:    f.Digest,
 						Total:     int(fi.Size()),
 						Completed: int(fi.Size()),
@@ -106,7 +87,7 @@ func monitorDownload(ctx context.Context, opts downloadOpts, f *FileDownload) er
 			if !ok {
 				return false, false, fmt.Errorf("invalid type for in progress download: %T", val)
 			}
-			opts.fn(api.ProgressResponse{
+			fn(api.ProgressResponse{
 				Status:    fmt.Sprintf("downloading %s", f.Digest),
 				Digest:    f.Digest,
 				Total:     int(f.Total),
@@ -122,19 +103,16 @@ func monitorDownload(ctx context.Context, opts downloadOpts, f *FileDownload) er
 			return nil
 		}
 		if resume {
-			return doDownload(ctx, opts, f)
+			return doDownload(ctx, mp, regOpts, f, fn)
 		}
 	}
 	return nil
 }
 
-var (
-	chunkSize   = 1024 * 1024 // 1 MiB in bytes
-	errDownload = fmt.Errorf("download failed")
-)
+var chunkSize = 1024 * 1024 // 1 MiB in bytes
 
 // doDownload downloads a blob from the registry and stores it in the blobs directory
-func doDownload(ctx context.Context, opts downloadOpts, f *FileDownload) error {
+func doDownload(ctx context.Context, mp ModelPath, regOpts *RegistryOptions, f *FileDownload, fn func(api.ProgressResponse)) error {
 	defer inProgress.Delete(f.Digest)
 	var size int64
 
@@ -155,21 +133,21 @@ func doDownload(ctx context.Context, opts downloadOpts, f *FileDownload) error {
 		}
 	}
 
-	url := fmt.Sprintf("%s/v2/%s/blobs/%s", opts.mp.Registry, opts.mp.GetNamespaceRepository(), f.Digest)
+	url := fmt.Sprintf("%s/v2/%s/blobs/%s", mp.Registry, mp.GetNamespaceRepository(), f.Digest)
 	headers := map[string]string{
 		"Range": fmt.Sprintf("bytes=%d-", size),
 	}
 
-	resp, err := makeRequest(ctx, "GET", url, headers, nil, opts.regOpts)
+	resp, err := makeRequest(ctx, "GET", url, headers, nil, regOpts)
 	if err != nil {
 		log.Printf("couldn't download blob: %v", err)
-		return fmt.Errorf("%w: %w", errDownload, err)
+		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("%w: on download registry responded with code %d: %v", errDownload, resp.StatusCode, string(body))
+		return fmt.Errorf("on download registry responded with code %d: %v", resp.StatusCode, string(body))
 	}
 
 	err = os.MkdirAll(path.Dir(f.FilePath), 0o700)
@@ -196,7 +174,7 @@ outerLoop:
 			inProgress.Delete(f.Digest)
 			return nil
 		default:
-			opts.fn(api.ProgressResponse{
+			fn(api.ProgressResponse{
 				Status:    fmt.Sprintf("downloading %s", f.Digest),
 				Digest:    f.Digest,
 				Total:     int(f.Total),
@@ -209,7 +187,7 @@ outerLoop:
 				}
 
 				if err := os.Rename(f.FilePath+"-partial", f.FilePath); err != nil {
-					opts.fn(api.ProgressResponse{
+					fn(api.ProgressResponse{
 						Status:    fmt.Sprintf("error renaming file: %v", err),
 						Digest:    f.Digest,
 						Total:     int(f.Total),
@@ -224,7 +202,7 @@ outerLoop:
 
 		n, err := io.CopyN(out, resp.Body, int64(chunkSize))
 		if err != nil && !errors.Is(err, io.EOF) {
-			return fmt.Errorf("%w: %w", errDownload, err)
+			return err
 		}
 		f.Completed += n
 
