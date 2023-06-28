@@ -105,9 +105,9 @@ type LayerReader struct {
 
 type ConfigV2 struct {
 	ModelFamily llm.ModelFamily `json:"model_family"`
-	ModelType   llm.ModelType   `json:"model_type"`
-	FileType    llm.FileType    `json:"file_type"`
-	RootFS      RootFS          `json:"rootfs"`
+	ModelType   string      `json:"model_type"`
+	FileType    string      `json:"file_type"`
+	RootFS      RootFS      `json:"rootfs"`
 
 	// required by spec
 	Architecture string `json:"architecture"`
@@ -308,9 +308,9 @@ func CreateModel(ctx context.Context, name string, path string, fn func(resp api
 						return err
 					}
 
-					config.ModelFamily = ggml.ModelFamily
-					config.ModelType = ggml.ModelType
-					config.FileType = ggml.FileType
+					config.ModelFamily = ggml.ModelFamily()
+					config.ModelType = ggml.ModelType().String()
+					config.FileType = ggml.FileType().String()
 
 					// reset the file
 					file.Seek(0, io.SeekStart)
@@ -995,7 +995,14 @@ func PullModel(ctx context.Context, name string, regOpts *RegistryOptions, fn fu
 	layers = append(layers, &manifest.Config)
 
 	for _, layer := range layers {
-		if err := downloadBlob(ctx, mp, layer.Digest, regOpts, fn); err != nil {
+		if err := downloadBlob(
+			ctx,
+			downloadOpts{
+				mp:      mp,
+				digest:  layer.Digest,
+				regOpts: regOpts,
+				fn:      fn,
+			}); err != nil {
 			return err
 		}
 	}
@@ -1106,7 +1113,11 @@ func GetSHA256Digest(r io.Reader) (string, int) {
 	return fmt.Sprintf("sha256:%x", h.Sum(nil)), int(n)
 }
 
+type requestContextKey string
+
 func startUpload(ctx context.Context, mp ModelPath, layer *Layer, regOpts *RegistryOptions) (string, error) {
+	retry, _ := ctx.Value(requestContextKey("retry")).(int)
+
 	url := fmt.Sprintf("%s/v2/%s/blobs/uploads/", mp.Registry, mp.GetNamespaceRepository())
 	if layer.From != "" {
 		url = fmt.Sprintf("%s/v2/%s/blobs/uploads/?mount=%s&from=%s", mp.Registry, mp.GetNamespaceRepository(), layer.Digest, layer.From)
@@ -1119,8 +1130,25 @@ func startUpload(ctx context.Context, mp ModelPath, layer *Layer, regOpts *Regis
 	}
 	defer resp.Body.Close()
 
-	// Check for success
-	if resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusCreated {
+	switch resp.StatusCode {
+	case http.StatusAccepted, http.StatusCreated:
+		// noop
+	case http.StatusUnauthorized:
+		if retry > MaxRetries {
+			return "", fmt.Errorf("max retries exceeded: %s", resp.Status)
+		}
+
+		auth := resp.Header.Get("www-authenticate")
+		authRedir := ParseAuthRedirectString(auth)
+		token, err := getAuthToken(ctx, authRedir, regOpts)
+		if err != nil {
+			return "", err
+		}
+
+		regOpts.Token = token
+		ctx = context.WithValue(ctx, requestContextKey("retry"), retry+1)
+		return startUpload(ctx, mp, layer, regOpts)
+	default:
 		body, _ := io.ReadAll(resp.Body)
 		return "", fmt.Errorf("on upload registry responded with code %d: %s", resp.StatusCode, body)
 	}
@@ -1152,7 +1180,6 @@ func checkBlobExistence(ctx context.Context, mp ModelPath, digest string, regOpt
 func uploadBlobChunked(ctx context.Context, mp ModelPath, url string, layer *Layer, regOpts *RegistryOptions, fn func(api.ProgressResponse)) error {
 	// TODO allow resumability
 	// TODO allow canceling uploads via DELETE
-	// TODO allow cross repo blob mount
 
 	fp, err := GetBlobsPath(layer.Digest)
 	if err != nil {
@@ -1165,49 +1192,78 @@ func uploadBlobChunked(ctx context.Context, mp ModelPath, url string, layer *Lay
 	}
 	defer f.Close()
 
-	totalUploaded := 0
+	completed := 0
+	chunkSize := 10 * 1024 * 1024
 
-	r, w := io.Pipe()
-	defer r.Close()
+	for {
+		r, w := io.Pipe()
+		defer r.Close()
 
-	go func() {
-		defer w.Close()
-		for {
-			n, err := io.CopyN(w, f, 1024*1024)
-			if err != nil && !errors.Is(err, io.EOF) {
+		limit := completed + chunkSize
+		if chunkSize >= layer.Size-completed {
+			limit = layer.Size
+			chunkSize = layer.Size - completed
+		}
+
+		go func() {
+			defer w.Close()
+			for {
+				n, err := io.CopyN(w, f, 1024*1024)
+				if err != nil && !errors.Is(err, io.EOF) {
+					fn(api.ProgressResponse{
+						Status:    fmt.Sprintf("error copying pipe: %v", err),
+						Digest:    layer.Digest,
+						Total:     layer.Size,
+						Completed: completed,
+					})
+					return
+				}
+
+				completed += int(n)
+
 				fn(api.ProgressResponse{
-					Status:    fmt.Sprintf("error copying pipe: %v", err),
+					Status:    fmt.Sprintf("uploading %s", layer.Digest),
 					Digest:    layer.Digest,
 					Total:     layer.Size,
-					Completed: totalUploaded,
+					Completed: completed,
 				})
-				return
+
+				if completed >= limit {
+					return
+				}
 			}
+		}()
 
-			totalUploaded += int(n)
+		headers := make(map[string]string)
+		headers["Content-Type"] = "application/octet-stream"
+		headers["Content-Length"] = strconv.Itoa(chunkSize)
+		headers["Content-Range"] = fmt.Sprintf("%d-%d", completed, limit-1)
 
-			fn(api.ProgressResponse{
-				Status:    fmt.Sprintf("uploading %s", layer.Digest),
-				Digest:    layer.Digest,
-				Total:     layer.Size,
-				Completed: totalUploaded,
-			})
-
-			if totalUploaded >= layer.Size {
-				return
-			}
+		resp, err := makeRequest(ctx, "PATCH", url, headers, r, regOpts)
+		if err != nil {
+			return err
 		}
-	}()
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusAccepted {
+			body, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("on finish upload registry responded with code %d: %v", resp.StatusCode, string(body))
+		}
+
+		url = resp.Header.Get("Location")
+		if completed >= layer.Size {
+			break
+		}
+	}
 
 	url = fmt.Sprintf("%s&digest=%s", url, layer.Digest)
 
 	headers := make(map[string]string)
 	headers["Content-Type"] = "application/octet-stream"
-	headers["Content-Range"] = fmt.Sprintf("0-%d", layer.Size-1)
-	headers["Content-Length"] = strconv.Itoa(int(layer.Size))
+	headers["Content-Length"] = "0"
 
 	// finish the upload
-	resp, err := makeRequest(ctx, "PUT", url, headers, r, regOpts)
+	resp, err := makeRequest(ctx, "PUT", url, headers, nil, regOpts)
 	if err != nil {
 		log.Printf("couldn't finish upload: %v", err)
 		return err
@@ -1222,15 +1278,6 @@ func uploadBlobChunked(ctx context.Context, mp ModelPath, url string, layer *Lay
 }
 
 func makeRequest(ctx context.Context, method, url string, headers map[string]string, body io.Reader, regOpts *RegistryOptions) (*http.Response, error) {
-	retryCtx := ctx.Value("retries")
-	var retries int
-	var ok bool
-	if retries, ok = retryCtx.(int); ok {
-		if retries > MaxRetries {
-			return nil, fmt.Errorf("maximum retries hit; are you sure you have access to this resource?")
-		}
-	}
-
 	if !strings.HasPrefix(url, "http") {
 		if regOpts.Insecure {
 			url = "http://" + url
@@ -1239,18 +1286,7 @@ func makeRequest(ctx context.Context, method, url string, headers map[string]str
 		}
 	}
 
-	// make a copy of the body in case we need to try the call to makeRequest again
-	var buf bytes.Buffer
-	if body != nil {
-		_, err := io.Copy(&buf, body)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	bodyCopy := bytes.NewReader(buf.Bytes())
-
-	req, err := http.NewRequest(method, url, bodyCopy)
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1274,23 +1310,10 @@ func makeRequest(ctx context.Context, method, url string, headers map[string]str
 			return nil
 		},
 	}
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
-	}
-
-	// if the request is unauthenticated, try to authenticate and make the request again
-	if resp.StatusCode == http.StatusUnauthorized {
-		auth := resp.Header.Get("Www-Authenticate")
-		authRedir := ParseAuthRedirectString(string(auth))
-		token, err := getAuthToken(ctx, authRedir, regOpts)
-		if err != nil {
-			return nil, err
-		}
-		regOpts.Token = token
-		bodyCopy = bytes.NewReader(buf.Bytes())
-		ctx = context.WithValue(ctx, "retries", retries+1)
-		return makeRequest(ctx, method, url, headers, bodyCopy, regOpts)
 	}
 
 	return resp, nil
