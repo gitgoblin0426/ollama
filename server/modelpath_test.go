@@ -3,14 +3,20 @@ package server
 import "testing"
 
 func TestParseModelPath(t *testing.T) {
+	type input struct {
+		name          string
+		allowInsecure bool
+	}
+
 	tests := []struct {
 		name    string
-		arg    string
+		args    input
 		want    ModelPath
+		wantErr error
 	}{
 		{
 			"full path https",
-			"https://example.com/ns/repo:tag",
+			input{"https://example.com/ns/repo:tag", false},
 			ModelPath{
 				ProtocolScheme: "https",
 				Registry:       "example.com",
@@ -18,10 +24,17 @@ func TestParseModelPath(t *testing.T) {
 				Repository:     "repo",
 				Tag:            "tag",
 			},
+			nil,
 		},
 		{
-			"full path http",
-			"http://example.com/ns/repo:tag",
+			"full path http without insecure",
+			input{"http://example.com/ns/repo:tag", false},
+			ModelPath{},
+			ErrInsecureProtocol,
+		},
+		{
+			"full path http with insecure",
+			input{"http://example.com/ns/repo:tag", true},
 			ModelPath{
 				ProtocolScheme: "http",
 				Registry:       "example.com",
@@ -29,10 +42,17 @@ func TestParseModelPath(t *testing.T) {
 				Repository:     "repo",
 				Tag:            "tag",
 			},
+			nil,
+		},
+		{
+			"full path invalid protocol",
+			input{"file://example.com/ns/repo:tag", false},
+			ModelPath{},
+			ErrInvalidProtocol,
 		},
 		{
 			"no protocol",
-			"example.com/ns/repo:tag",
+			input{"example.com/ns/repo:tag", false},
 			ModelPath{
 				ProtocolScheme: "https",
 				Registry:       "example.com",
@@ -40,10 +60,11 @@ func TestParseModelPath(t *testing.T) {
 				Repository:     "repo",
 				Tag:            "tag",
 			},
+			nil,
 		},
 		{
 			"no registry",
-			"ns/repo:tag",
+			input{"ns/repo:tag", false},
 			ModelPath{
 				ProtocolScheme: "https",
 				Registry:       DefaultRegistry,
@@ -51,10 +72,11 @@ func TestParseModelPath(t *testing.T) {
 				Repository:     "repo",
 				Tag:            "tag",
 			},
+			nil,
 		},
 		{
 			"no namespace",
-			"repo:tag",
+			input{"repo:tag", false},
 			ModelPath{
 				ProtocolScheme: "https",
 				Registry:       DefaultRegistry,
@@ -62,10 +84,11 @@ func TestParseModelPath(t *testing.T) {
 				Repository:     "repo",
 				Tag:            "tag",
 			},
+			nil,
 		},
 		{
 			"no tag",
-			"repo",
+			input{"repo", false},
 			ModelPath{
 				ProtocolScheme: "https",
 				Registry:       DefaultRegistry,
@@ -73,12 +96,23 @@ func TestParseModelPath(t *testing.T) {
 				Repository:     "repo",
 				Tag:            DefaultTag,
 			},
+			nil,
+		},
+		{
+			"invalid image format",
+			input{"example.com/a/b/c", false},
+			ModelPath{},
+			ErrInvalidImageFormat,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := ParseModelPath(tc.arg)
+			got, err := ParseModelPath(tc.args.name, tc.args.allowInsecure)
+
+			if err != tc.wantErr {
+				t.Errorf("got: %q want: %q", err, tc.wantErr)
+			}
 
 			if got != tc.want {
 				t.Errorf("got: %q want: %q", got, tc.want)

@@ -30,7 +30,7 @@ var (
 	ErrInsecureProtocol   = errors.New("insecure protocol http")
 )
 
-func ParseModelPath(name string) ModelPath {
+func ParseModelPath(name string, allowInsecure bool) (ModelPath, error) {
 	mp := ModelPath{
 		ProtocolScheme: DefaultProtocolScheme,
 		Registry:       DefaultRegistry,
@@ -39,31 +39,39 @@ func ParseModelPath(name string) ModelPath {
 		Tag:            DefaultTag,
 	}
 
-	parts := strings.Split(name, "://")
-	if len(parts) > 1 {
-		mp.ProtocolScheme = parts[0]
-		name = parts[1]
+	protocol, rest, didSplit := strings.Cut(name, "://")
+	if didSplit {
+		if protocol == "https" || protocol == "http" && allowInsecure {
+			mp.ProtocolScheme = protocol
+			name = rest
+		} else if protocol == "http" && !allowInsecure {
+			return ModelPath{}, ErrInsecureProtocol
+		} else {
+			return ModelPath{}, ErrInvalidProtocol
+		}
 	}
 
-	parts = strings.Split(name, "/")
-	switch len(parts) {
+	slashParts := strings.Split(name, "/")
+	switch len(slashParts) {
 	case 3:
-		mp.Registry = parts[0]
-		mp.Namespace = parts[1]
-		mp.Repository = parts[2]
+		mp.Registry = slashParts[0]
+		mp.Namespace = slashParts[1]
+		mp.Repository = slashParts[2]
 	case 2:
-		mp.Namespace = parts[0]
-		mp.Repository = parts[1]
+		mp.Namespace = slashParts[0]
+		mp.Repository = slashParts[1]
 	case 1:
-		mp.Repository = parts[0]
+		mp.Repository = slashParts[0]
+	default:
+		return ModelPath{}, ErrInvalidImageFormat
 	}
 
-	if repo, tag, found := strings.Cut(mp.Repository, ":"); found {
+	if repo, tag, didSplit := strings.Cut(mp.Repository, ":"); didSplit {
 		mp.Repository = repo
 		mp.Tag = tag
 	}
 
-	return mp
+	return mp, nil
 }
 
 func (mp ModelPath) GetNamespaceRepository() string {

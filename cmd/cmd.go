@@ -30,6 +30,7 @@ import (
 	"github.com/jmorganca/ollama/format"
 	"github.com/jmorganca/ollama/progressbar"
 	"github.com/jmorganca/ollama/server"
+	"github.com/jmorganca/ollama/version"
 )
 
 func CreateHandler(cmd *cobra.Command, args []string) error {
@@ -102,13 +103,9 @@ func RunHandler(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	mp := server.ParseModelPath(args[0])
+	mp, err := server.ParseModelPath(args[0], insecure)
 	if err != nil {
 		return err
-	}
-
-	if mp.ProtocolScheme == "http" && !insecure {
-		return fmt.Errorf("insecure protocol http")
 	}
 
 	fp, err := mp.GetManifestPath(false)
@@ -519,7 +516,7 @@ func generateInteractive(cmd *cobra.Command, model string) error {
 		case strings.HasPrefix(line, "/show"):
 			args := strings.Fields(line)
 			if len(args) > 1 {
-				mp := server.ParseModelPath(model)
+				mp, err := server.ParseModelPath(model, false)
 				if err != nil {
 					return err
 				}
@@ -731,6 +728,7 @@ func NewCLI() *cobra.Command {
 		CompletionOptions: cobra.CompletionOptions{
 			DisableDefaultCmd: true,
 		},
+		Version: version.Version,
 	}
 
 	cobra.EnableCommandSorting = false
