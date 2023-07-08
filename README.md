@@ -105,7 +105,7 @@ For more examples, see the [examples](./examples) directory. For more informatio
 ### Pull a model from the registry
 
 ```
-ollama pull orca
+ollama pull orca-mini
 ```
 
 ### Listing local models
@@ -126,6 +126,8 @@ Ollama bundles model weights, configuration, and data into a single package, def
 </picture>
 
 ## Building
+
+You will also need a C/C++ compiler such as GCC for MacOS and Linux or Mingw-w64 GCC for Windows.
 
 ```
 go build .
