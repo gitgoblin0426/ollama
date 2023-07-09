@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -44,6 +45,7 @@ type Model struct {
 	Template     string
 	System       string
 	Digest       string
+	ConfigDigest string
 	Options      map[string]interface{}
 	Embeddings   []vector.Embedding
 }
@@ -131,41 +133,45 @@ func (m *ManifestV2) GetTotalSize() int {
 	return total
 }
 
-func GetManifest(mp ModelPath) (*ManifestV2, error) {
+func GetManifest(mp ModelPath) (*ManifestV2, string, error) {
 	fp, err := mp.GetManifestPath(false)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	if _, err = os.Stat(fp); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	var manifest *ManifestV2
 
 	bts, err := os.ReadFile(fp)
 	if err != nil {
-		return nil, fmt.Errorf("couldn't open file '%s'", fp)
+		return nil, "", fmt.Errorf("couldn't open file '%s'", fp)
 	}
+
+	shaSum := sha256.Sum256(bts)
+	shaStr := hex.EncodeToString(shaSum[:])
 
 	if err := json.Unmarshal(bts, &manifest); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
-	return manifest, nil
+	return manifest, shaStr, nil
 }
 
 func GetModel(name string) (*Model, error) {
 	mp := ParseModelPath(name)
-	manifest, err := GetManifest(mp)
+	manifest, digest, err := GetManifest(mp)
 	if err != nil {
 		return nil, err
 	}
 
 	model := &Model{
-		Name:     mp.GetFullTagname(),
-		Digest:   manifest.Config.Digest,
-		Template: "{{ .Prompt }}",
+		Name:         mp.GetFullTagname(),
+		Digest:       digest,
+		ConfigDigest: manifest.Config.Digest,
+		Template:     "{{ .Prompt }}",
 	}
 
 	for _, layer := range manifest.Layers {
@@ -277,7 +283,7 @@ func CreateModel(ctx context.Context, name string, path string, fn func(resp api
 			embed.model = c.Args
 
 			mp := ParseModelPath(c.Args)
-			mf, err := GetManifest(mp)
+			mf, _, err := GetManifest(mp)
 			if err != nil {
 				modelFile, err := filenameWithPath(path, c.Args)
 				if err != nil {
@@ -290,7 +296,7 @@ func CreateModel(ctx context.Context, name string, path string, fn func(resp api
 						if err := PullModel(ctx, c.Args, &RegistryOptions{}, fn); err != nil {
 							return err
 						}
-						mf, err = GetManifest(mp)
+						mf, _, err = GetManifest(mp)
 						if err != nil {
 							return fmt.Errorf("failed to open file after pull: %v", err)
 						}
@@ -839,7 +845,7 @@ func CopyModel(src, dest string) error {
 
 func DeleteModel(name string) error {
 	mp := ParseModelPath(name)
-	manifest, err := GetManifest(mp)
+	manifest, _, err := GetManifest(mp)
 	if err != nil {
 		return err
 	}
@@ -872,7 +878,7 @@ func DeleteModel(name string) error {
 			}
 
 			// save (i.e. delete from the deleteMap) any files used in other manifests
-			manifest, err := GetManifest(fmp)
+			manifest, _, err := GetManifest(fmp)
 			if err != nil {
 				log.Printf("skipping file: %s", fp)
 				return nil
@@ -924,7 +930,7 @@ func PushModel(ctx context.Context, name string, regOpts *RegistryOptions, fn fu
 		return fmt.Errorf("insecure protocol http")
 	}
 
-	manifest, err := GetManifest(mp)
+	manifest, _, err := GetManifest(mp)
 	if err != nil {
 		fn(api.ProgressResponse{Status: "couldn't retrieve manifest"})
 		return err
@@ -974,7 +980,7 @@ func PushModel(ctx context.Context, name string, regOpts *RegistryOptions, fn fu
 			continue
 		}
 
-		if err := uploadBlobChunked(ctx, location, layer, regOpts, fn); err != nil {
+		if err := uploadBlobChunked(ctx, mp, location, layer, regOpts, fn); err != nil {
 			log.Printf("error uploading blob: %v", err)
 			return err
 		}
@@ -1086,11 +1092,11 @@ func pullModelManifest(ctx context.Context, mp ModelPath, regOpts *RegistryOptio
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= http.StatusBadRequest {
+	// Check for success: For a successful upload, the Docker registry will respond with a 201 Created
+	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode == http.StatusNotFound {
 			return nil, fmt.Errorf("model not found")
 		}
-
 		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("on pull registry responded with code %d: %s", resp.StatusCode, body)
 	}
@@ -1151,7 +1157,7 @@ func checkBlobExistence(ctx context.Context, mp ModelPath, digest string, regOpt
 	defer resp.Body.Close()
 
 	// Check for success: If the blob exists, the Docker registry will respond with a 200 OK
-	return resp.StatusCode < http.StatusBadRequest, nil
+	return resp.StatusCode == http.StatusOK, nil
 }
 
 func makeRequestWithRetry(ctx context.Context, method string, requestURL *url.URL, headers http.Header, body io.ReadSeeker, regOpts *RegistryOptions) (*http.Response, error) {
@@ -1165,8 +1171,10 @@ func makeRequestWithRetry(ctx context.Context, method string, requestURL *url.UR
 
 		status = resp.Status
 
-		switch {
-		case resp.StatusCode == http.StatusUnauthorized:
+		switch resp.StatusCode {
+		case http.StatusAccepted, http.StatusCreated:
+			return resp, nil
+		case http.StatusUnauthorized:
 			auth := resp.Header.Get("www-authenticate")
 			authRedir := ParseAuthRedirectString(auth)
 			token, err := getAuthToken(ctx, authRedir, regOpts)
@@ -1182,11 +1190,9 @@ func makeRequestWithRetry(ctx context.Context, method string, requestURL *url.UR
 			}
 
 			continue
-		case resp.StatusCode >= http.StatusBadRequest:
+		default:
 			body, _ := io.ReadAll(resp.Body)
 			return nil, fmt.Errorf("on upload registry responded with code %d: %s", resp.StatusCode, body)
-		default:
-			return resp, nil
 		}
 	}
 
