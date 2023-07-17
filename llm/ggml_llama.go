@@ -286,8 +286,8 @@ func newLlama(model string, adapters []string, runner ModelRunner, opts api.Opti
 			runner.Path,
 			append(params, "--port", strconv.Itoa(port))...,
 		)
-		cmd.Stdout = os.Stderr
-		cmd.Stderr = os.Stderr
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
 
 		llm := &llama{Options: opts, Running: Running{Port: port, Cmd: cmd, Cancel: cancel}}
 
@@ -437,19 +437,15 @@ type PredictRequest struct {
 	Stop             []string        `json:"stop,omitempty"`
 }
 
-func (llm *llama) Predict(ctx context.Context, prevContext []int, prompt string, fn func(api.GenerateResponse)) error {
-	prevConvo, err := llm.Decode(ctx, prevContext)
+func (llm *llama) Predict(ctx context.Context, predictCtx []int, prompt string, fn func(api.GenerateResponse)) error {
+	// we need to find the trimmed prompt context before predicting so that we can return it to the client
+	trimmedPrompt, err := llm.marshalPrompt(ctx, predictCtx, prompt)
 	if err != nil {
-		return err
+		return fmt.Errorf("marshaling prompt: %v", err)
 	}
-
-	var nextContext strings.Builder
-	nextContext.WriteString(prevConvo)
-	nextContext.WriteString(prompt)
-
 	endpoint := fmt.Sprintf("http://127.0.0.1:%d/completion", llm.Port)
 	predReq := PredictRequest{
-		Prompt:           nextContext.String(),
+		Prompt:           trimmedPrompt,
 		Stream:           true,
 		NPredict:         llm.NumPredict,
 		NKeep:            llm.NumKeep,
@@ -495,6 +491,7 @@ func (llm *llama) Predict(ctx context.Context, prevContext []int, prompt string,
 	}
 
 	scanner := bufio.NewScanner(resp.Body)
+	genCtx := trimmedPrompt // start with the trimmed prompt
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
@@ -515,12 +512,11 @@ func (llm *llama) Predict(ctx context.Context, prevContext []int, prompt string,
 				}
 
 				if complete.Timings.PredictedMS > 0 {
-					nextContext.WriteString(complete.Content)
-					embd, err := llm.Encode(ctx, nextContext.String())
+					genCtx += complete.Content
+					embd, err := llm.Encode(ctx, genCtx)
 					if err != nil {
 						return fmt.Errorf("encoding context: %v", err)
 					}
-
 					fn(api.GenerateResponse{
 						Done:               true,
 						Context:            embd,
@@ -532,13 +528,12 @@ func (llm *llama) Predict(ctx context.Context, prevContext []int, prompt string,
 					return nil
 				}
 
-				var p Prediction
-				if err := json.Unmarshal([]byte(evt), &p); err != nil {
+				var pred Prediction
+				if err := json.Unmarshal([]byte(evt), &pred); err != nil {
 					return fmt.Errorf("error unmarshaling llm prediction response: %v", err)
 				}
-
-				fn(api.GenerateResponse{Response: p.Content})
-				nextContext.WriteString(p.Content)
+				genCtx += pred.Content
+				fn(api.GenerateResponse{Response: pred.Content})
 			}
 		}
 	}
@@ -548,6 +543,34 @@ func (llm *llama) Predict(ctx context.Context, prevContext []int, prompt string,
 	}
 
 	return nil
+}
+
+func (llm *llama) marshalPrompt(ctx context.Context, pCtx []int, prompt string) (string, error) {
+	pEncode, err := llm.Encode(ctx, prompt)
+	if err != nil {
+		return "", fmt.Errorf("encoding prompt context: %w", err)
+	}
+	tokens := append(pCtx, pEncode...)
+	if llm.NumKeep < 0 {
+		llm.NumKeep = len(tokens)
+	}
+
+	// min(llm.NumCtx - 4, llm.NumKeep)
+	if llm.NumCtx-4 < llm.NumKeep {
+		llm.NumKeep = llm.NumCtx - 4
+	}
+
+	if len(tokens) >= llm.NumCtx {
+		// truncate input
+		numLeft := (llm.NumCtx - llm.NumKeep) / 2
+		truncated := tokens[:llm.NumKeep]
+		erasedBlocks := (len(tokens) - llm.NumKeep - numLeft - 1) / numLeft
+		truncated = append(truncated, tokens[llm.NumKeep+erasedBlocks*numLeft:]...)
+		tokens = truncated
+		log.Printf("input truncated: num_ctx=%d num_keep=%d num_left=%d num_tokens=%d", llm.NumCtx, llm.NumKeep, numLeft, len(truncated))
+	}
+
+	return llm.Decode(ctx, tokens)
 }
 
 type TokenizeRequest struct {

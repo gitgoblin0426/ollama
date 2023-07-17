@@ -117,13 +117,12 @@ func load(ctx context.Context, model *Model, reqOpts map[string]interface{}, ses
 			if err != nil {
 				return err
 			}
-
 			tokensNoSystem, err := llmModel.Encode(ctx, promptNoSystem)
 			if err != nil {
 				return err
 			}
 
-			opts.NumKeep = len(tokensWithSystem) - len(tokensNoSystem)
+			opts.NumKeep = len(tokensWithSystem) - len(tokensNoSystem) + 1
 
 			llmModel.SetOptions(opts)
 		}
