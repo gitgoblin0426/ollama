@@ -114,12 +114,7 @@ func GetManifestPath() (string, error) {
 		return "", err
 	}
 
-	path := filepath.Join(home, ".ollama", "models", "manifests")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return "", err
-	}
-
-	return path, nil
+	return filepath.Join(home, ".ollama", "models", "manifests"), nil
 }
 
 func GetBlobsPath(digest string) (string, error) {
