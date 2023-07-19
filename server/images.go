@@ -1300,7 +1300,7 @@ func makeRequestWithRetry(ctx context.Context, method string, requestURL *url.UR
 }
 
 func makeRequest(ctx context.Context, method string, requestURL *url.URL, headers http.Header, body io.Reader, regOpts *RegistryOptions) (*http.Response, error) {
-	if requestURL.Scheme != "http" && regOpts.Insecure {
+	if requestURL.Scheme != "http" && regOpts != nil && regOpts.Insecure {
 		requestURL.Scheme = "http"
 	}
 
@@ -1313,10 +1313,12 @@ func makeRequest(ctx context.Context, method string, requestURL *url.URL, header
 		req.Header = headers
 	}
 
-	if regOpts.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+regOpts.Token)
-	} else if regOpts.Username != "" && regOpts.Password != "" {
-		req.SetBasicAuth(regOpts.Username, regOpts.Password)
+	if regOpts != nil {
+		if regOpts.Token != "" {
+			req.Header.Set("Authorization", "Bearer "+regOpts.Token)
+		} else if regOpts.Username != "" && regOpts.Password != "" {
+			req.SetBasicAuth(regOpts.Username, regOpts.Password)
+		}
 	}
 
 	req.Header.Set("User-Agent", fmt.Sprintf("ollama/%s (%s %s) Go/%s", version.Version, runtime.GOARCH, runtime.GOOS, runtime.Version()))
