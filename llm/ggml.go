@@ -3,14 +3,11 @@ package llm
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
-	"path"
-	"sync"
 )
 
 type ModelFamily string
-
-const ModelFamilyUnknown ModelFamily = "unknown"
 
 type ModelType uint32
 
@@ -60,17 +57,18 @@ type model interface {
 
 type container interface {
 	Name() string
-	Decode(io.Reader) (model, error)
+	Decode(io.Reader) error
 }
 
-type containerGGML struct{}
+type containerGGML struct {
+}
 
 func (c *containerGGML) Name() string {
 	return "ggml"
 }
 
-func (c *containerGGML) Decode(r io.Reader) (model, error) {
-	return nil, nil
+func (c *containerGGML) Decode(r io.Reader) error {
+	return nil
 }
 
 type containerGGMF struct {
@@ -81,18 +79,18 @@ func (c *containerGGMF) Name() string {
 	return "ggmf"
 }
 
-func (c *containerGGMF) Decode(r io.Reader) (model, error) {
+func (c *containerGGMF) Decode(r io.Reader) error {
 	var version uint32
 	binary.Read(r, binary.LittleEndian, &version)
 
 	switch version {
 	case 1:
 	default:
-		return nil, errors.New("invalid version")
+		return errors.New("invalid version")
 	}
 
 	c.version = version
-	return nil, nil
+	return nil
 }
 
 type containerGGJT struct {
@@ -103,22 +101,18 @@ func (c *containerGGJT) Name() string {
 	return "ggjt"
 }
 
-func (c *containerGGJT) Decode(r io.Reader) (model, error) {
+func (c *containerGGJT) Decode(r io.Reader) error {
 	var version uint32
 	binary.Read(r, binary.LittleEndian, &version)
 
 	switch version {
 	case 1, 2, 3:
 	default:
-		return nil, errors.New("invalid version")
+		return errors.New("invalid version")
 	}
 
 	c.version = version
-
-	// different model types may have different layouts for hyperparameters
-	var llama llamaModel
-	binary.Read(r, binary.LittleEndian, &llama.hyperparameters)
-	return &llama, nil
+	return nil
 }
 
 type containerLORA struct {
@@ -129,51 +123,32 @@ func (c *containerLORA) Name() string {
 	return "ggla"
 }
 
-func (c *containerLORA) Decode(r io.Reader) (model, error) {
+func (c *containerLORA) Decode(r io.Reader) error {
 	var version uint32
 	binary.Read(r, binary.LittleEndian, &version)
 
 	switch version {
 	case 1:
 	default:
-		return nil, errors.New("invalid version")
+		return errors.New("invalid version")
 	}
 
 	c.version = version
-	return nil, nil
-}
-
-var (
-	ggmlGPU = path.Join("llama.cpp", "ggml", "build", "gpu", "bin")
-	ggmlCPU = path.Join("llama.cpp", "ggml", "build", "cpu", "bin")
-)
-
-var (
-	ggmlInit       sync.Once
-	ggmlRunnerPath string
-)
-
-func ggmlRunner() ModelRunner {
-	ggmlInit.Do(func() {
-		ggmlRunnerPath = chooseRunner(ggmlGPU, ggmlCPU)
-	})
-	return ModelRunner{Path: ggmlRunnerPath}
+	return nil
 }
 
 const (
-	// Magic constant for `ggml` files (unversioned).
+	// / Magic constant for `ggml` files (unversioned).
 	FILE_MAGIC_GGML = 0x67676d6c
-	// Magic constant for `ggml` files (versioned, ggmf).
+	// / Magic constant for `ggml` files (versioned, ggmf).
 	FILE_MAGIC_GGMF = 0x67676d66
-	// Magic constant for `ggml` files (versioned, ggjt).
+	// / Magic constant for `ggml` files (versioned, ggjt).
 	FILE_MAGIC_GGJT = 0x67676a74
-	// Magic constant for `ggla` files (LoRA adapter).
+	// / Magic constant for `ggla` files (LoRA adapter).
 	FILE_MAGIC_GGLA = 0x67676C61
-	// Magic constant for `gguf` files (versioned, gguf)
-	FILE_MAGIC_GGUF = 0x46554747
 )
 
-func DecodeGGML(r io.ReadSeeker) (*GGML, error) {
+func DecodeGGML(r io.ReadSeeker, hint ModelFamily) (*GGML, error) {
 	var ggml GGML
 	binary.Read(r, binary.LittleEndian, &ggml.magic)
 
@@ -186,18 +161,24 @@ func DecodeGGML(r io.ReadSeeker) (*GGML, error) {
 		ggml.container = &containerGGJT{}
 	case FILE_MAGIC_GGLA:
 		ggml.container = &containerLORA{}
-	case FILE_MAGIC_GGUF:
-		ggml.container = &containerGGUF{}
 	default:
 		return nil, errors.New("invalid file magic")
 	}
 
-	model, err := ggml.Decode(r)
-	if err != nil {
+	if err := ggml.Decode(r); err != nil {
 		return nil, err
 	}
 
-	ggml.model = model
+	// different model types may have different layouts for hyperparameters
+	switch hint {
+	case ModelFamilyLlama:
+		var llama llamaModel
+		binary.Read(r, binary.LittleEndian, &llama.hyperparameters)
+		ggml.model = &llama
+		// TODO: sanity check hyperparameters
+	default:
+		return nil, fmt.Errorf("unsupported model type: %s", hint)
+	}
 
 	// final model type
 	return &ggml, nil

@@ -32,22 +32,15 @@ func New(model string, adapters []string, opts api.Options) (LLM, error) {
 	}
 	defer f.Close()
 
-	ggml, err := DecodeGGML(f)
+	ggml, err := DecodeGGML(f, ModelFamilyLlama)
 	if err != nil {
 		return nil, err
 	}
 
 	switch ggml.FileType().String() {
-	case "Q8_0":
-		if ggml.Name() != "gguf" && opts.NumGPU != 0 {
-			// GGML Q8_0 do not support Metal API and will
-			// cause the runner to segmentation fault so disable GPU
-			log.Printf("WARNING: GPU disabled for F32, Q5_0, Q5_1, and Q8_0")
-			opts.NumGPU = 0
-		}
-	case "F32", "Q5_0", "Q5_1":
+	case "F32", "Q5_0", "Q5_1", "Q8_0":
 		if opts.NumGPU != 0 {
-			// F32, Q5_0, Q5_1, and Q8_0 do not support Metal API and will
+			// F32, F16, Q5_0, Q5_1, and Q8_0 do not support Metal API and will
 			// cause the runner to segmentation fault so disable GPU
 			log.Printf("WARNING: GPU disabled for F32, Q5_0, Q5_1, and Q8_0")
 			opts.NumGPU = 0
@@ -82,11 +75,8 @@ func New(model string, adapters []string, opts api.Options) (LLM, error) {
 		}
 	}
 
-	switch ggml.Name() {
-	case "gguf":
-		opts.NumGQA = 0 // TODO: remove this when llama.cpp runners differ enough to need separate newLlama functions
-		return newLlama(model, adapters, ggufRunner(), opts)
-	case "ggml", "ggmf", "ggjt", "ggla":
+	switch ggml.ModelFamily() {
+	case ModelFamilyLlama:
 		return newLlama(model, adapters, ggmlRunner(), opts)
 	default:
 		return nil, fmt.Errorf("unknown ggml type: %s", ggml.ModelFamily())
