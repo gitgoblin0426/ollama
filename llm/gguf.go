@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"path"
 	"sync"
 )
@@ -86,37 +87,38 @@ func (llm *ggufModel) NumKV() uint64 {
 	return llm.V2.NumKV
 }
 
-func (llm *ggufModel) ModelFamily() string {
+func (llm *ggufModel) ModelFamily() ModelFamily {
 	t, ok := llm.kv["general.architecture"].(string)
 	if ok {
-		return t
+		return ModelFamily(t)
 	}
 
-	return "unknown"
+	log.Printf("unknown model family: %T", t)
+	return ModelFamilyUnknown
 }
 
-func (llm *ggufModel) ModelType() string {
+func (llm *ggufModel) ModelType() ModelType {
 	switch llm.ModelFamily() {
-	case "llama":
-		if blocks, ok := llm.kv["llama.block_count"].(uint32); ok {
-			return llamaModelType(blocks)
-		}
-	case "falcon":
-		if blocks, ok := llm.kv["falcon.block_count"].(uint32); ok {
-			return falconModelType(blocks)
+	case ModelFamilyLlama:
+		blocks, ok := llm.kv["llama.block_count"].(uint32)
+		if ok {
+			return ModelType(blocks)
 		}
 	}
 
-	return "Unknown"
+	return ModelType7B
 }
 
-func (llm *ggufModel) FileType() string {
-	t, ok := llm.kv["general.file_type"].(uint32)
-	if ok {
-		return fileType(t)
+func (llm *ggufModel) FileType() FileType {
+	switch llm.ModelFamily() {
+	case ModelFamilyLlama:
+		t, ok := llm.kv["general.file_type"].(uint32)
+		if ok {
+			return llamaFileType(t)
+		}
 	}
 
-	return "Unknown"
+	return llamaFileTypeF16
 }
 
 func (llm *ggufModel) Decode(r io.Reader) error {
