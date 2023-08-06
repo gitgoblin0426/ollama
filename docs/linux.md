@@ -72,3 +72,9 @@ Then start the service:
 sudo systemctl daemon-reload
 sudo systemctl enable ollama
 ```
+
+## Run a model
+
+```
+ollama run llama2
+```
