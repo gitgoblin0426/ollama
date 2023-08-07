@@ -43,7 +43,7 @@ func (p Painter) Paint(line []rune, _ int) []rune {
 		if p.IsMultiLine {
 			prompt = "Use \"\"\" to end multi-line input"
 		} else {
-			prompt = "Send a message (/? for help)"
+			prompt = "Send a message (/? for help, /bye to exit)"
 		}
 		return []rune(fmt.Sprintf("\033[38;5;245m%s\033[%dD\033[0m", prompt, len(prompt)))
 	}
@@ -127,13 +127,9 @@ func RunHandler(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	modelName, modelTag, ok := strings.Cut(args[0], ":")
-	if !ok {
-		modelTag = "latest"
-	}
-
+	canonicalModelPath := server.ParseModelPath(args[0])
 	for _, model := range models.Models {
-		if model.Name == strings.Join([]string{modelName, modelTag}, ":") {
+		if model.Name == canonicalModelPath.GetShortTagname() {
 			return RunGenerate(cmd, args)
 		}
 	}

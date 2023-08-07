@@ -54,13 +54,9 @@ fi
 status "Downloading ollama..."
 curl --fail --show-error --location --progress-bar -o $TEMP_DIR/ollama "https://ollama.ai/download/ollama-linux-$ARCH"
 
-for BINDIR in /usr/local/bin /usr/bin /bin; do
-    echo $PATH | grep -q $BINDIR && break || continue
-done
-
-status "Installing ollama to $BINDIR..."
-$SUDO install -o0 -g0 -m755 -d $BINDIR
-$SUDO install -o0 -g0 -m755 $TEMP_DIR/ollama $BINDIR/ollama
+status "Installing ollama to /usr/bin..."
+$SUDO install -o0 -g0 -m755 -d /usr/bin
+$SUDO install -o0 -g0 -m755 $TEMP_DIR/ollama /usr/bin/ollama
 
 install_success() { status 'Install complete. Run "ollama" from the command line.'; }
 trap install_success EXIT
@@ -80,7 +76,7 @@ Description=Ollama Service
 After=network-online.target
 
 [Service]
-ExecStart=$BINDIR/ollama serve
+ExecStart=/usr/bin/ollama serve
 User=ollama
 Group=ollama
 Restart=always
