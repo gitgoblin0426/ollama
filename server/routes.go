@@ -378,18 +378,6 @@ func DeleteModelHandler(c *gin.Context) {
 		}
 		return
 	}
-
-	manifestsPath, err := GetManifestPath()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	if err := PruneDirectory(manifestsPath); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
 	c.JSON(http.StatusOK, nil)
 }
 
