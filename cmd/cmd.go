@@ -78,18 +78,18 @@ func CreateHandler(cmd *cobra.Command, args []string) error {
 			currentDigest = resp.Digest
 			switch {
 			case strings.Contains(resp.Status, "embeddings"):
-				bar = progressbar.Default(int64(resp.Total), resp.Status)
-				bar.Set(resp.Completed)
+				bar = progressbar.Default(resp.Total, resp.Status)
+				bar.Set64(resp.Completed)
 			default:
 				// pulling
 				bar = progressbar.DefaultBytes(
-					int64(resp.Total),
+					resp.Total,
 					resp.Status,
 				)
-				bar.Set(resp.Completed)
+				bar.Set64(resp.Completed)
 			}
 		} else if resp.Digest == currentDigest && resp.Digest != "" {
-			bar.Set(resp.Completed)
+			bar.Set64(resp.Completed)
 		} else {
 			currentDigest = ""
 			if spinner != nil {
@@ -160,13 +160,13 @@ func PushHandler(cmd *cobra.Command, args []string) error {
 		if resp.Digest != currentDigest && resp.Digest != "" {
 			currentDigest = resp.Digest
 			bar = progressbar.DefaultBytes(
-				int64(resp.Total),
+				resp.Total,
 				fmt.Sprintf("pushing %s...", resp.Digest[7:19]),
 			)
 
-			bar.Set(resp.Completed)
+			bar.Set64(resp.Completed)
 		} else if resp.Digest == currentDigest && resp.Digest != "" {
-			bar.Set(resp.Completed)
+			bar.Set64(resp.Completed)
 		} else {
 			currentDigest = ""
 			fmt.Println(resp.Status)
@@ -349,13 +349,13 @@ func pull(model string, insecure bool) error {
 		if resp.Digest != currentDigest && resp.Digest != "" {
 			currentDigest = resp.Digest
 			bar = progressbar.DefaultBytes(
-				int64(resp.Total),
+				resp.Total,
 				fmt.Sprintf("pulling %s...", resp.Digest[7:19]),
 			)
 
-			bar.Set(resp.Completed)
+			bar.Set64(resp.Completed)
 		} else if resp.Digest == currentDigest && resp.Digest != "" {
-			bar.Set(resp.Completed)
+			bar.Set64(resp.Completed)
 		} else {
 			currentDigest = ""
 			fmt.Println(resp.Status)
@@ -635,6 +635,8 @@ func generateInteractive(cmd *cobra.Command, model string) error {
 					} else {
 						usage()
 					}
+				default:
+					fmt.Printf("Unknown command '/set %s'. Type /? for help\n", args[1])
 				}
 			} else {
 				usage()
@@ -659,7 +661,7 @@ func generateInteractive(cmd *cobra.Command, model string) error {
 				case "template":
 					fmt.Println(resp.Template)
 				default:
-					fmt.Println("error: unknown command")
+					fmt.Printf("Unknown command '/show %s'. Type /? for help\n", args[1])
 				}
 			} else {
 				usage()
