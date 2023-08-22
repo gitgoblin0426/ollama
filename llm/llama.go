@@ -20,7 +20,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/jmorganca/ollama/api"
@@ -178,12 +177,9 @@ type llamaHyperparameters struct {
 }
 
 type Running struct {
-	Port     int
-	Cmd      *exec.Cmd
-	Cancel   context.CancelFunc
-	exitOnce sync.Once
-	exitCh   chan error // channel to receive the exit status of the subprocess
-	exitErr  error      // error returned by the subprocess
+	Port   int
+	Cmd    *exec.Cmd
+	Cancel context.CancelFunc
 }
 
 type llama struct {
@@ -195,7 +191,7 @@ var errNoGPU = errors.New("nvidia-smi command failed")
 
 // CheckVRAM returns the available VRAM in MiB on Linux machines with NVIDIA GPUs
 func CheckVRAM() (int64, error) {
-	cmd := exec.Command("nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits")
+	cmd := exec.Command("nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits")
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	err := cmd.Run()
@@ -203,7 +199,7 @@ func CheckVRAM() (int64, error) {
 		return 0, errNoGPU
 	}
 
-	var free int64
+	var total int64
 	scanner := bufio.NewScanner(&stdout)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -212,10 +208,10 @@ func CheckVRAM() (int64, error) {
 			return 0, fmt.Errorf("failed to parse available VRAM: %v", err)
 		}
 
-		free += vram
+		total += vram
 	}
 
-	return free, nil
+	return total, nil
 }
 
 func NumGPU(numLayer, fileSizeBytes int64, opts api.Options) int {
@@ -232,14 +228,14 @@ func NumGPU(numLayer, fileSizeBytes int64, opts api.Options) int {
 			return 0
 		}
 
-		freeVramBytes := int64(vramMib) * 1024 * 1024 // 1 MiB = 1024^2 bytes
+		totalVramBytes := int64(vramMib) * 1024 * 1024 // 1 MiB = 1024^2 bytes
 
 		// Calculate bytes per layer
 		// TODO: this is a rough heuristic, better would be to calculate this based on number of layers and context size
 		bytesPerLayer := fileSizeBytes / numLayer
 
-		// max number of layers we can fit in VRAM, subtract 5% to prevent consuming all available VRAM and running out of memory
-		layers := int(freeVramBytes/bytesPerLayer) * 95 / 100
+		// max number of layers we can fit in VRAM
+		layers := int(totalVramBytes / bytesPerLayer)
 		log.Printf("%d MiB VRAM available, loading up to %d GPU layers", vramMib, layers)
 
 		return layers
@@ -312,7 +308,7 @@ func newLlama(model string, adapters []string, runners []ModelRunner, numLayers 
 		cmd.Stdout = os.Stderr
 		cmd.Stderr = os.Stderr
 
-		llm := &llama{Options: opts, Running: Running{Port: port, Cmd: cmd, Cancel: cancel, exitCh: make(chan error)}}
+		llm := &llama{Options: opts, Running: Running{Port: port, Cmd: cmd, Cancel: cancel}}
 
 		log.Print("starting llama runner")
 		if err := llm.Cmd.Start(); err != nil {
@@ -320,14 +316,14 @@ func newLlama(model string, adapters []string, runners []ModelRunner, numLayers 
 			continue
 		}
 
-		// monitor the llama runner process and signal when it exits
+		// monitor the command, it is blocking, so if it exits we need to capture that
 		go func() {
-			err := llm.Cmd.Wait()
-			llm.exitErr = err
-			// llm.Cmd.Wait() can only be called once, use this exit channel to signal that the process has exited
-			llm.exitOnce.Do(func() {
-				close(llm.exitCh)
-			})
+			err := llm.Cmd.Wait() // this will block until the command exits
+			if err != nil {
+				log.Printf("llama runner exited with error: %v", err)
+			} else {
+				log.Printf("llama runner exited")
+			}
 		}()
 
 		if err := waitForServer(llm); err != nil {
@@ -345,45 +341,33 @@ func newLlama(model string, adapters []string, runners []ModelRunner, numLayers 
 }
 
 func waitForServer(llm *llama) error {
+	// wait for the server to start responding
 	start := time.Now()
 	expiresAt := time.Now().Add(2 * time.Minute) // be generous with timeout, large models can take a while to load
 	ticker := time.NewTicker(200 * time.Millisecond)
-	defer ticker.Stop()
 
 	log.Print("waiting for llama runner to start responding")
-	for {
-		select {
-		case <-llm.exitCh:
-			// failed to start subprocess
-			return fmt.Errorf("llama runner process has terminated")
-		case <-ticker.C:
-			if time.Now().After(expiresAt) {
-				// timeout
-				return fmt.Errorf("llama runner did not start within allotted time, retrying")
-			}
+	for range ticker.C {
+		if time.Now().After(expiresAt) {
+			return fmt.Errorf("llama runner did not start within alloted time, retrying")
+		}
 
-			if err := llm.Ping(context.Background()); err == nil {
-				// success
-				log.Printf("llama runner started in %f seconds", time.Since(start).Seconds())
-				return nil
-			}
+		// check if the server process has terminated
+		if llm.Cmd.ProcessState != nil && llm.Cmd.ProcessState.Exited() {
+			return fmt.Errorf("llama runner process has terminated")
+		}
+
+		if err := llm.Ping(context.Background()); err == nil {
+			break
 		}
 	}
+
+	log.Printf("llama runner started in %f seconds", time.Since(start).Seconds())
+	return nil
 }
 
 func (llm *llama) Close() {
-	// signal the sub-process to terminate
 	llm.Cancel()
-
-	// wait for the command to exit to prevent race conditions with the next run
-	<-llm.exitCh
-	err := llm.exitErr
-
-	if err != nil {
-		log.Printf("llama runner stopped with error: %v", err)
-	} else {
-		log.Print("llama runner stopped successfully")
-	}
 }
 
 func (llm *llama) SetOptions(opts api.Options) {
