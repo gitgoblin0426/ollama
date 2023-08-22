@@ -20,7 +20,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/jmorganca/ollama/api"
-	"github.com/jmorganca/ollama/format"
 )
 
 var blobDownloadManager sync.Map
@@ -35,9 +34,6 @@ type blobDownload struct {
 	Parts []*blobDownloadPart
 
 	context.CancelFunc
-
-	done       bool
-	err        error
 	references atomic.Int32
 }
 
@@ -49,12 +45,6 @@ type blobDownloadPart struct {
 
 	*blobDownload `json:"-"`
 }
-
-const (
-	numDownloadParts          = 64
-	minDownloadPartSize int64 = 32 * 1000 * 1000
-	maxDownloadPartSize int64 = 256 * 1000 * 1000
-)
 
 func (p *blobDownloadPart) Name() string {
 	return strings.Join([]string{
@@ -101,15 +91,9 @@ func (b *blobDownload) Prepare(ctx context.Context, requestURL *url.URL, opts *R
 
 		b.Total, _ = strconv.ParseInt(resp.Header.Get("Content-Length"), 10, 64)
 
-		var size = b.Total / numDownloadParts
-		switch {
-		case size < minDownloadPartSize:
-			size = minDownloadPartSize
-		case size > maxDownloadPartSize:
-			size = maxDownloadPartSize
-		}
-
 		var offset int64
+		var size int64 = 64 * 1024 * 1024
+
 		for offset < b.Total {
 			if offset+size > b.Total {
 				size = b.Total - offset
@@ -123,15 +107,11 @@ func (b *blobDownload) Prepare(ctx context.Context, requestURL *url.URL, opts *R
 		}
 	}
 
-	log.Printf("downloading %s in %d %s part(s)", b.Digest[7:19], len(b.Parts), format.HumanBytes(b.Parts[0].Size))
+	log.Printf("downloading %s in %d part(s)", b.Digest[7:19], len(b.Parts))
 	return nil
 }
 
-func (b *blobDownload) Run(ctx context.Context, requestURL *url.URL, opts *RegistryOptions) {
-	b.err = b.run(ctx, requestURL, opts)
-}
-
-func (b *blobDownload) run(ctx context.Context, requestURL *url.URL, opts *RegistryOptions) error {
+func (b *blobDownload) Run(ctx context.Context, requestURL *url.URL, opts *RegistryOptions) (err error) {
 	defer blobDownloadManager.Delete(b.Digest)
 
 	ctx, b.CancelFunc = context.WithCancel(ctx)
@@ -144,8 +124,9 @@ func (b *blobDownload) run(ctx context.Context, requestURL *url.URL, opts *Regis
 
 	file.Truncate(b.Total)
 
-	g, _ := errgroup.WithContext(ctx)
-	g.SetLimit(numDownloadParts)
+	g, ctx := errgroup.WithContext(ctx)
+	// TODO(mxyng): download concurrency should be configurable
+	g.SetLimit(64)
 	for i := range b.Parts {
 		part := b.Parts[i]
 		if part.Completed == part.Size {
@@ -187,12 +168,7 @@ func (b *blobDownload) run(ctx context.Context, requestURL *url.URL, opts *Regis
 		}
 	}
 
-	if err := os.Rename(file.Name(), b.Name); err != nil {
-		return err
-	}
-
-	b.done = true
-	return nil
+	return os.Rename(file.Name(), b.Name)
 }
 
 func (b *blobDownload) downloadChunk(ctx context.Context, requestURL *url.URL, w io.Writer, part *blobDownloadPart, opts *RegistryOptions) error {
@@ -291,8 +267,11 @@ func (b *blobDownload) Wait(ctx context.Context, fn func(api.ProgressResponse)) 
 			Completed: b.Completed.Load(),
 		})
 
-		if b.done || b.err != nil {
-			return b.err
+		if b.Completed.Load() >= b.Total {
+			// wait for the file to get renamed
+			if _, err := os.Stat(b.Name); err == nil {
+				return nil
+			}
 		}
 	}
 }
@@ -335,7 +314,6 @@ func downloadBlob(ctx context.Context, opts downloadOpts) error {
 		requestURL := opts.mp.BaseURL()
 		requestURL = requestURL.JoinPath("v2", opts.mp.GetNamespaceRepository(), "blobs", opts.digest)
 		if err := download.Prepare(ctx, requestURL, opts.regOpts); err != nil {
-			blobDownloadManager.Delete(opts.digest)
 			return err
 		}
 
