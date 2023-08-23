@@ -247,8 +247,8 @@ func NumGPU(numLayer, fileSizeBytes int64, opts api.Options) int {
 		// TODO: this is a rough heuristic, better would be to calculate this based on number of layers and context size
 		bytesPerLayer := fileSizeBytes / numLayer
 
-		// max number of layers we can fit in VRAM, subtract 5% to prevent consuming all available VRAM and running out of memory
-		layers := int(freeVramBytes/bytesPerLayer) * 95 / 100
+		// max number of layers we can fit in VRAM, subtract 8% to prevent consuming all available VRAM and running out of memory
+		layers := int(freeVramBytes/bytesPerLayer) * 92 / 100
 		log.Printf("%d MiB VRAM available, loading up to %d GPU layers", vramMib, layers)
 
 		return layers
@@ -270,8 +270,7 @@ func NewStatusWriter() *StatusWriter {
 
 func (w *StatusWriter) Write(b []byte) (int, error) {
 	if _, after, ok := bytes.Cut(b, []byte("error:")); ok {
-		err := fmt.Errorf("llama runner: %s", after)
-		w.ErrCh <- err
+		w.ErrCh <- fmt.Errorf("llama runner: %s", bytes.TrimSpace(after))
 	}
 	return os.Stderr.Write(b)
 }
@@ -510,7 +509,7 @@ type PredictRequest struct {
 	Stop             []string `json:"stop,omitempty"`
 }
 
-const maxBufferSize = 512 * 1000 // 512KB
+const maxBufferSize = 512 * format.KiloByte
 
 func (llm *llama) Predict(ctx context.Context, prevContext []int, prompt string, fn func(api.GenerateResponse)) error {
 	prevConvo, err := llm.Decode(ctx, prevContext)
