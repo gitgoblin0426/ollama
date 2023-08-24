@@ -215,6 +215,11 @@ func CheckVRAM() (int64, error) {
 		free += vram
 	}
 
+	if free*1024*1024 < 2*1000*1000*1000 {
+		log.Printf("less than 2 GB VRAM available, falling back to CPU only")
+		free = 0
+	}
+
 	return free, nil
 }
 
@@ -238,8 +243,8 @@ func NumGPU(numLayer, fileSizeBytes int64, opts api.Options) int {
 		// TODO: this is a rough heuristic, better would be to calculate this based on number of layers and context size
 		bytesPerLayer := fileSizeBytes / numLayer
 
-		// max number of layers we can fit in VRAM, subtract 8% to prevent consuming all available VRAM and running out of memory
-		layers := int(freeVramBytes/bytesPerLayer) * 92 / 100
+		// max number of layers we can fit in VRAM, subtract 5% to prevent consuming all available VRAM and running out of memory
+		layers := int(freeVramBytes/bytesPerLayer) * 95 / 100
 		log.Printf("%d MiB VRAM available, loading up to %d GPU layers", vramMib, layers)
 
 		return layers
@@ -261,7 +266,8 @@ func NewStatusWriter() *StatusWriter {
 
 func (w *StatusWriter) Write(b []byte) (int, error) {
 	if _, after, ok := bytes.Cut(b, []byte("error:")); ok {
-		w.ErrCh <- fmt.Errorf("llama runner: %s", bytes.TrimSpace(after))
+		err := fmt.Errorf("llama runner: %s", after)
+		w.ErrCh <- err
 	}
 	return os.Stderr.Write(b)
 }
