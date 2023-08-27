@@ -688,12 +688,7 @@ func generateInteractive(cmd *cobra.Command, model string) error {
 		case strings.HasPrefix(line, "/show"):
 			args := strings.Fields(line)
 			if len(args) > 1 {
-				client, err := api.ClientFromEnvironment()
-				if err != nil {
-					fmt.Println("error: couldn't connect to ollama server")
-					return err
-				}
-				resp, err := client.Show(cmd.Context(), &api.ShowRequest{Name: model})
+				resp, err := server.GetModelInfo(model)
 				if err != nil {
 					fmt.Println("error: couldn't get model")
 					return err
