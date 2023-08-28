@@ -70,7 +70,7 @@ func chooseRunners(workDir, runnerType string) []ModelRunner {
 		files, err := fs.Glob(llamaCppEmbed, path.Join(path.Dir(r.Path), "*"))
 		if err != nil {
 			// this is expected, ollama may be compiled without all runners packed in
-			log.Printf("%s runner not found: %v", r, err)
+			log.Printf("%s runner not found: %v", r.Path, err)
 			continue
 		}
 
@@ -249,7 +249,7 @@ func NumGPU(numLayer, fileSizeBytes int64, opts api.Options) int {
 
 		// max number of layers we can fit in VRAM, subtract 8% to prevent consuming all available VRAM and running out of memory
 		layers := int(freeBytes/bytesPerLayer) * 92 / 100
-		log.Printf("%d MiB VRAM available, loading up to %d GPU layers", freeBytes, layers)
+		log.Printf("%d MB VRAM available, loading up to %d GPU layers", freeBytes/(1024*1024), layers)
 
 		return layers
 	}
@@ -292,11 +292,8 @@ func newLlama(model string, adapters []string, runners []ModelRunner, numLayers 
 		"--rope-freq-base", fmt.Sprintf("%f", opts.RopeFrequencyBase),
 		"--rope-freq-scale", fmt.Sprintf("%f", opts.RopeFrequencyScale),
 		"--batch-size", fmt.Sprintf("%d", opts.NumBatch),
+		"--n-gpu-layers", fmt.Sprintf("%d", numGPU),
 		"--embedding",
-	}
-
-	if numGPU > 0 {
-		params = append(params, "--n-gpu-layers", fmt.Sprintf("%d", numGPU))
 	}
 
 	if opts.NumGQA > 0 {
@@ -544,12 +541,16 @@ func (llm *llama) Predict(ctx context.Context, prevContext []int, prompt string,
 		Stop:             llm.Stop,
 	}
 
-	data, err := json.Marshal(predReq)
-	if err != nil {
-		return fmt.Errorf("error marshaling data: %v", err)
+	// Handling JSON marshaling with special characters unescaped.
+	buffer := &bytes.Buffer{}
+	enc := json.NewEncoder(buffer)
+	enc.SetEscapeHTML(false)
+
+	if err := enc.Encode(predReq); err != nil {
+		return fmt.Errorf("failed to marshal data: %v", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewBuffer(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, buffer)
 	if err != nil {
 		return fmt.Errorf("error creating POST request: %v", err)
 	}
