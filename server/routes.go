@@ -23,10 +23,11 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"gonum.org/v1/gonum/mat"
 
 	"github.com/jmorganca/ollama/api"
 	"github.com/jmorganca/ollama/llm"
-	"github.com/jmorganca/ollama/version"
+	"github.com/jmorganca/ollama/vector"
 )
 
 var mode string = gin.DebugMode
@@ -46,7 +47,8 @@ func init() {
 var loaded struct {
 	mu sync.Mutex
 
-	llm llm.LLM
+	llm        llm.LLM
+	Embeddings []vector.Embedding
 
 	expireAt    time.Time
 	expireTimer *time.Timer
@@ -88,6 +90,11 @@ func load(ctx context.Context, workDir string, model *Model, reqOpts map[string]
 			loaded.digest = ""
 		}
 
+		if model.Embeddings != nil && len(model.Embeddings) > 0 {
+			opts.EmbeddingOnly = true // this is requried to generate embeddings, completions will still work
+			loaded.Embeddings = model.Embeddings
+		}
+
 		llmModel, err := llm.New(workDir, model.ModelPath, model.AdapterPaths, opts)
 		if err != nil {
 			return err
@@ -99,12 +106,12 @@ func load(ctx context.Context, workDir string, model *Model, reqOpts map[string]
 		loaded.options = opts
 
 		if opts.NumKeep < 0 {
-			promptWithSystem, err := model.Prompt(api.GenerateRequest{})
+			promptWithSystem, err := model.Prompt(api.GenerateRequest{}, "")
 			if err != nil {
 				return err
 			}
 
-			promptNoSystem, err := model.Prompt(api.GenerateRequest{Context: []int{0}})
+			promptNoSystem, err := model.Prompt(api.GenerateRequest{Context: []int{0}}, "")
 			if err != nil {
 				return err
 			}
@@ -188,7 +195,22 @@ func GenerateHandler(c *gin.Context) {
 
 	checkpointLoaded := time.Now()
 
-	prompt, err := model.Prompt(req)
+	embedding := ""
+	if model.Embeddings != nil && len(model.Embeddings) > 0 {
+		promptEmbed, err := loaded.llm.Embedding(c.Request.Context(), req.Prompt)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		// TODO: set embed_top from specified parameters in modelfile
+		embed_top := 3
+		topK := vector.TopK(embed_top, mat.NewVecDense(len(promptEmbed), promptEmbed), loaded.Embeddings)
+		for _, e := range topK {
+			embedding = fmt.Sprintf("%s %s", embedding, e.Embedding.Data)
+		}
+	}
+
+	prompt, err := model.Prompt(req, embedding)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -589,7 +611,7 @@ func Serve(ln net.Listener, allowOrigins []string) error {
 		r.Handle(method, "/api/tags", ListModelsHandler)
 	}
 
-	log.Printf("Listening on %s (version %s)", ln.Addr(), version.Version)
+	log.Printf("Listening on %s", ln.Addr())
 	s := &http.Server{
 		Handler: r,
 	}
