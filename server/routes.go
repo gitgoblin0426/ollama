@@ -481,7 +481,7 @@ func GetModelInfo(name string) (*api.ShowResponse, error) {
 }
 
 func ListModelsHandler(c *gin.Context) {
-	models := make([]api.ModelResponse, 0)
+	var models []api.ModelResponse
 	fp, err := GetManifestPath()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
