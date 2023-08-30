@@ -161,10 +161,15 @@ func (r *GenerateResponse) Summary() {
 	}
 }
 
-// Runner options which must be set when the model is loaded into memory
-type Runner struct {
-	UseNUMA            bool    `json:"numa,omitempty"`
+type Options struct {
+	Seed int `json:"seed,omitempty"`
+
+	// Backend options
+	UseNUMA bool `json:"numa,omitempty"`
+
+	// Model options
 	NumCtx             int     `json:"num_ctx,omitempty"`
+	NumKeep            int     `json:"num_keep,omitempty"`
 	NumBatch           int     `json:"num_batch,omitempty"`
 	NumGQA             int     `json:"num_gqa,omitempty"`
 	NumGPU             int     `json:"num_gpu,omitempty"`
@@ -178,15 +183,8 @@ type Runner struct {
 	EmbeddingOnly      bool    `json:"embedding_only,omitempty"`
 	RopeFrequencyBase  float32 `json:"rope_frequency_base,omitempty"`
 	RopeFrequencyScale float32 `json:"rope_frequency_scale,omitempty"`
-	NumThread          int     `json:"num_thread,omitempty"`
-}
 
-type Options struct {
-	Runner
-
-	// Predict options used at runtime
-	NumKeep          int      `json:"num_keep,omitempty"`
-	Seed             int      `json:"seed,omitempty"`
+	// Predict options
 	NumPredict       int      `json:"num_predict,omitempty"`
 	TopK             int      `json:"top_k,omitempty"`
 	TopP             float32  `json:"top_p,omitempty"`
@@ -202,6 +200,8 @@ type Options struct {
 	MirostatEta      float32  `json:"mirostat_eta,omitempty"`
 	PenalizeNewline  bool     `json:"penalize_newline,omitempty"`
 	Stop             []string `json:"stop,omitempty"`
+
+	NumThread int `json:"num_thread,omitempty"`
 }
 
 var ErrInvalidOpts = fmt.Errorf("invalid options")
@@ -309,22 +309,20 @@ func DefaultOptions() Options {
 		PenalizeNewline:  true,
 		Seed:             -1,
 
-		Runner: Runner{
-			// options set when the model is loaded
-			NumCtx:             2048,
-			RopeFrequencyBase:  10000.0,
-			RopeFrequencyScale: 1.0,
-			NumBatch:           512,
-			NumGPU:             -1, // -1 here indicates that NumGPU should be set dynamically
-			NumGQA:             1,
-			NumThread:          0, // let the runtime decide
-			LowVRAM:            false,
-			F16KV:              true,
-			UseMLock:           false,
-			UseMMap:            true,
-			UseNUMA:            false,
-			EmbeddingOnly:      true,
-		},
+		// options set when the model is loaded
+		NumCtx:             2048,
+		RopeFrequencyBase:  10000.0,
+		RopeFrequencyScale: 1.0,
+		NumBatch:           512,
+		NumGPU:             -1, // -1 here indicates that NumGPU should be set dynamically
+		NumGQA:             1,
+		NumThread:          0, // let the runtime decide
+		LowVRAM:            false,
+		F16KV:              true,
+		UseMLock:           false,
+		UseMMap:            true,
+		UseNUMA:            false,
+		EmbeddingOnly:      true,
 	}
 }
 

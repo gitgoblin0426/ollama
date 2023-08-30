@@ -47,6 +47,16 @@ const config: ForgeConfig = {
   },
   rebuildConfig: {},
   makers: [new MakerSquirrel({}), new MakerZIP({}, ['darwin'])],
+  publishers: [
+    new PublisherGithub({
+      repository: {
+        name: 'ollama',
+        owner: 'jmorganca',
+      },
+      draft: false,
+      prerelease: true,
+    }),
+  ],
   hooks: {
     readPackageJson: async (_, packageJson) => {
       return { ...packageJson, version: process.env.VERSION || packageJson.version }
