@@ -175,8 +175,7 @@ const (
 	// Magic constant for `ggla` files (LoRA adapter).
 	FILE_MAGIC_GGLA = 0x67676C61
 	// Magic constant for `gguf` files (versioned, gguf)
-	FILE_MAGIC_GGUF_LE = 0x46554747
-	FILE_MAGIC_GGUF_BE = 0x47475546
+	FILE_MAGIC_GGUF = 0x46554747
 )
 
 func DecodeGGML(r io.ReadSeeker) (*GGML, error) {
@@ -192,10 +191,8 @@ func DecodeGGML(r io.ReadSeeker) (*GGML, error) {
 		ggml.container = &containerGGJT{}
 	case FILE_MAGIC_GGLA:
 		ggml.container = &containerLORA{}
-	case FILE_MAGIC_GGUF_LE:
-		ggml.container = &containerGGUF{bo: binary.LittleEndian}
-	case FILE_MAGIC_GGUF_BE:
-		ggml.container = &containerGGUF{bo: binary.BigEndian}
+	case FILE_MAGIC_GGUF:
+		ggml.container = &containerGGUF{}
 	default:
 		return nil, errors.New("invalid file magic")
 	}
