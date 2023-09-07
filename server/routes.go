@@ -365,9 +365,7 @@ func PushModelHandler(c *gin.Context) {
 			Insecure: req.Insecure,
 		}
 
-		ctx, cancel := context.WithCancel(c.Request.Context())
-		defer cancel()
-
+		ctx := context.Background()
 		if err := PushModel(ctx, req.Name, regOpts, fn); err != nil {
 			ch <- gin.H{"error": err.Error()}
 		}
