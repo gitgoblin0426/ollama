@@ -196,10 +196,7 @@ type llama struct {
 	Running
 }
 
-var (
-	errNvidiaSMI     = errors.New("nvidia-smi command failed")
-	errAvailableVRAM = errors.New("not enough VRAM available, falling back to CPU only")
-)
+var errNoGPU = errors.New("nvidia-smi command failed")
 
 // CheckVRAM returns the free VRAM in bytes on Linux machines with NVIDIA GPUs
 func CheckVRAM() (int64, error) {
@@ -208,7 +205,7 @@ func CheckVRAM() (int64, error) {
 	cmd.Stdout = &stdout
 	err := cmd.Run()
 	if err != nil {
-		return 0, errNvidiaSMI
+		return 0, errNoGPU
 	}
 
 	var freeMiB int64
@@ -229,8 +226,8 @@ func CheckVRAM() (int64, error) {
 
 	freeBytes := freeMiB * 1024 * 1024
 	if freeBytes < 2*format.GigaByte {
-		log.Printf("less than 2 GB VRAM available")
-		return 0, errAvailableVRAM
+		log.Printf("less than 2 GB VRAM available, falling back to CPU only")
+		freeMiB = 0
 	}
 
 	return freeBytes, nil
@@ -243,7 +240,7 @@ func NumGPU(numLayer, fileSizeBytes int64, opts api.Options) int {
 	if runtime.GOOS == "linux" {
 		freeBytes, err := CheckVRAM()
 		if err != nil {
-			if !errors.Is(err, errNvidiaSMI) {
+			if err.Error() != "nvidia-smi command failed" {
 				log.Print(err.Error())
 			}
 			// nvidia driver not installed or no nvidia GPU found
