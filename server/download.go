@@ -161,9 +161,6 @@ func (b *blobDownload) run(ctx context.Context, requestURL *url.URL, opts *Regis
 					log.Printf("%s part %d attempt %d failed: %v, retrying", b.Digest[7:19], i, try, err)
 					continue
 				default:
-					if try > 0 {
-						log.Printf("%s part %d completed after %d retries", b.Digest[7:19], i, try)
-					}
 					return nil
 				}
 			}
@@ -205,7 +202,7 @@ func (b *blobDownload) downloadChunk(ctx context.Context, requestURL *url.URL, w
 	defer resp.Body.Close()
 
 	n, err := io.Copy(w, io.TeeReader(resp.Body, b))
-	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, io.ErrUnexpectedEOF) {
+	if err != nil && !errors.Is(err, context.Canceled) {
 		// rollback progress
 		b.Completed.Add(-n)
 		return err
@@ -216,7 +213,7 @@ func (b *blobDownload) downloadChunk(ctx context.Context, requestURL *url.URL, w
 		return err
 	}
 
-	// return nil or context.Canceled or UnexpectedEOF (resumable)
+	// return nil or context.Canceled
 	return err
 }
 

@@ -27,34 +27,6 @@ import (
 	"github.com/jmorganca/ollama/format"
 )
 
-const jsonGrammar = `
-root   ::= object
-value  ::= object | array | string | number | ("true" | "false" | "null") ws
-
-object ::=
-  "{" ws (
-            string ":" ws value
-    ("," ws string ":" ws value)*
-  )? "}" ws
-
-array  ::=
-  "[" ws (
-            value
-    ("," ws value)*
-  )? "]" ws
-
-string ::=
-  "\"" (
-    [^"\\] |
-    "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F]) # escapes
-  )* "\"" ws
-
-number ::= ("-"? ([0-9] | [1-9] [0-9]*)) ("." [0-9]+)? ([eE] [-+]? [0-9]+)? ws
-
-# Optional space: by convention, applied in this grammar after literal chars when allowed
-ws ::= ([ \t\n] ws)?
-`
-
 //go:embed llama.cpp/*/build/*/bin/*
 var llamaCppEmbed embed.FS
 
@@ -224,10 +196,7 @@ type llama struct {
 	Running
 }
 
-var (
-	errNvidiaSMI     = errors.New("nvidia-smi command failed")
-	errAvailableVRAM = errors.New("not enough VRAM available, falling back to CPU only")
-)
+var errNoGPU = errors.New("nvidia-smi command failed")
 
 // CheckVRAM returns the free VRAM in bytes on Linux machines with NVIDIA GPUs
 func CheckVRAM() (int64, error) {
@@ -236,7 +205,7 @@ func CheckVRAM() (int64, error) {
 	cmd.Stdout = &stdout
 	err := cmd.Run()
 	if err != nil {
-		return 0, errNvidiaSMI
+		return 0, errNoGPU
 	}
 
 	var freeMiB int64
@@ -257,8 +226,8 @@ func CheckVRAM() (int64, error) {
 
 	freeBytes := freeMiB * 1024 * 1024
 	if freeBytes < 2*format.GigaByte {
-		log.Printf("less than 2 GB VRAM available")
-		return 0, errAvailableVRAM
+		log.Printf("less than 2 GB VRAM available, falling back to CPU only")
+		freeMiB = 0
 	}
 
 	return freeBytes, nil
@@ -271,7 +240,7 @@ func NumGPU(numLayer, fileSizeBytes int64, opts api.Options) int {
 	if runtime.GOOS == "linux" {
 		freeBytes, err := CheckVRAM()
 		if err != nil {
-			if !errors.Is(err, errNvidiaSMI) {
+			if err.Error() != "nvidia-smi command failed" {
 				log.Print(err.Error())
 			}
 			// nvidia driver not installed or no nvidia GPU found
@@ -525,7 +494,7 @@ type prediction struct {
 
 const maxBufferSize = 512 * format.KiloByte
 
-func (llm *llama) Predict(ctx context.Context, prevContext []int, prompt string, format string, fn func(api.GenerateResponse)) error {
+func (llm *llama) Predict(ctx context.Context, prevContext []int, prompt string, fn func(api.GenerateResponse)) error {
 	prevConvo, err := llm.Decode(ctx, prevContext)
 	if err != nil {
 		return err
@@ -558,10 +527,6 @@ func (llm *llama) Predict(ctx context.Context, prevContext []int, prompt string,
 		"penalize_nl":       llm.PenalizeNewline,
 		"seed":              llm.Seed,
 		"stop":              llm.Stop,
-	}
-
-	if format == "json" {
-		request["grammar"] = jsonGrammar
 	}
 
 	// Handling JSON marshaling with special characters unescaped.
