@@ -216,10 +216,6 @@ See the [API documentation](./docs/api.md) for all endpoints.
 
 ## Community Integrations
 
-### Mobile
-
-- [Maid](https://github.com/danemadsen/Maid) (Mobile Artificial Intelligence Distribution)
-
 ### Web & Desktop
 
 - [HTML UI](https://github.com/rtcfirefly/ollama-ui)
