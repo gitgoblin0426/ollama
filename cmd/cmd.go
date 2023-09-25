@@ -365,12 +365,7 @@ func RunGenerate(cmd *cobra.Command, args []string) error {
 			wordWrap = false
 		}
 
-		format, err := cmd.Flags().GetString("format")
-		if err != nil {
-			return err
-		}
-
-		return generate(cmd, args[0], strings.Join(args[1:], " "), wordWrap, format)
+		return generate(cmd, args[0], strings.Join(args[1:], " "), wordWrap)
 	}
 
 	if readline.IsTerminal(int(os.Stdin.Fd())) {
@@ -382,7 +377,7 @@ func RunGenerate(cmd *cobra.Command, args []string) error {
 
 type generateContextKey string
 
-func generate(cmd *cobra.Command, model, prompt string, wordWrap bool, format string) error {
+func generate(cmd *cobra.Command, model, prompt string, wordWrap bool) error {
 	client, err := api.ClientFromEnvironment()
 	if err != nil {
 		return err
@@ -419,7 +414,7 @@ func generate(cmd *cobra.Command, model, prompt string, wordWrap bool, format st
 	var currentLineLength int
 	var wordBuffer string
 
-	request := api.GenerateRequest{Model: model, Prompt: prompt, Context: generateContext, Format: format}
+	request := api.GenerateRequest{Model: model, Prompt: prompt, Context: generateContext}
 	fn := func(response api.GenerateResponse) error {
 		if !spinner.IsFinished() {
 			spinner.Finish()
@@ -492,7 +487,7 @@ func generate(cmd *cobra.Command, model, prompt string, wordWrap bool, format st
 
 func generateInteractive(cmd *cobra.Command, model string) error {
 	// load the model
-	if err := generate(cmd, model, "", false, ""); err != nil {
+	if err := generate(cmd, model, "", false); err != nil {
 		return err
 	}
 
@@ -513,8 +508,6 @@ func generateInteractive(cmd *cobra.Command, model string) error {
 		fmt.Fprintln(os.Stderr, "  /set nohistory    Disable history")
 		fmt.Fprintln(os.Stderr, "  /set wordwrap     Enable wordwrap")
 		fmt.Fprintln(os.Stderr, "  /set nowordwrap   Disable wordwrap")
-		fmt.Fprintln(os.Stderr, "  /set format json  Enable JSON mode")
-		fmt.Fprintln(os.Stderr, "  /set noformat     Disable formatting")
 		fmt.Fprintln(os.Stderr, "  /set verbose      Show LLM stats")
 		fmt.Fprintln(os.Stderr, "  /set quiet        Disable LLM stats")
 		fmt.Fprintln(os.Stderr, "")
@@ -538,11 +531,6 @@ func generateInteractive(cmd *cobra.Command, model string) error {
 	}
 
 	scanner, err := readline.New(prompt)
-	if err != nil {
-		return err
-	}
-
-	format, err := cmd.Flags().GetString("format")
 	if err != nil {
 		return err
 	}
@@ -625,16 +613,6 @@ func generateInteractive(cmd *cobra.Command, model string) error {
 				case "quiet":
 					cmd.Flags().Set("verbose", "false")
 					fmt.Println("Set 'quiet' mode.")
-				case "format":
-					if len(args) < 3 || args[2] != "json" {
-						fmt.Println("Invalid or missing format. For 'json' mode use '/set format json'")
-					} else {
-						format = args[2]
-						fmt.Printf("Set format to '%s' mode.\n", args[2])
-					}
-				case "noformat":
-					format = ""
-					fmt.Println("Disabled format.")
 				default:
 					fmt.Printf("Unknown command '/set %s'. Type /? for help\n", args[1])
 				}
@@ -708,7 +686,7 @@ func generateInteractive(cmd *cobra.Command, model string) error {
 		}
 
 		if len(line) > 0 && line[0] != '/' {
-			if err := generate(cmd, model, line, wordWrap, format); err != nil {
+			if err := generate(cmd, model, line, wordWrap); err != nil {
 				return err
 			}
 		}
@@ -720,7 +698,7 @@ func generateBatch(cmd *cobra.Command, model string) error {
 	for scanner.Scan() {
 		prompt := scanner.Text()
 		fmt.Printf(">>> %s\n", prompt)
-		if err := generate(cmd, model, prompt, false, ""); err != nil {
+		if err := generate(cmd, model, prompt, false); err != nil {
 			return err
 		}
 	}
@@ -905,7 +883,6 @@ func NewCLI() *cobra.Command {
 	runCmd.Flags().Bool("verbose", false, "Show timings for response")
 	runCmd.Flags().Bool("insecure", false, "Use an insecure registry")
 	runCmd.Flags().Bool("nowordwrap", false, "Don't wrap words to the next line automatically")
-	runCmd.Flags().String("format", "", "Response format (e.g. json)")
 
 	serveCmd := &cobra.Command{
 		Use:     "serve",
