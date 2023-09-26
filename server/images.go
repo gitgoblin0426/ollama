@@ -397,7 +397,7 @@ func CreateModel(ctx context.Context, name string, path string, fn func(resp api
 					if err != nil {
 						return err
 					}
-					newLayer.From = mp.GetShortTagname()
+					newLayer.From = mp.GetNamespaceRepository()
 					layers = append(layers, newLayer)
 				}
 			}
