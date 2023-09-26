@@ -1,10 +1,11 @@
 package cmd
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -21,7 +22,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/dustin/go-humanize"
 	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/ssh"
@@ -29,6 +29,7 @@ import (
 
 	"github.com/jmorganca/ollama/api"
 	"github.com/jmorganca/ollama/format"
+	"github.com/jmorganca/ollama/parser"
 	"github.com/jmorganca/ollama/progressbar"
 	"github.com/jmorganca/ollama/readline"
 	"github.com/jmorganca/ollama/server"
@@ -47,17 +48,64 @@ func CreateHandler(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	var spinner *Spinner
+	modelfile, err := os.ReadFile(filename)
+	if err != nil {
+		return err
+	}
+
+	spinner := NewSpinner("transferring context")
+	go spinner.Spin(100 * time.Millisecond)
+
+	commands, err := parser.Parse(bytes.NewReader(modelfile))
+	if err != nil {
+		return err
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+
+	for _, c := range commands {
+		switch c.Name {
+		case "model", "adapter":
+			path := c.Args
+			if path == "~" {
+				path = home
+			} else if strings.HasPrefix(path, "~/") {
+				path = filepath.Join(home, path[2:])
+			}
+
+			bin, err := os.Open(path)
+			if errors.Is(err, os.ErrNotExist) && c.Name == "model" {
+				continue
+			} else if err != nil {
+				return err
+			}
+			defer bin.Close()
+
+			hash := sha256.New()
+			if _, err := io.Copy(hash, bin); err != nil {
+				return err
+			}
+			bin.Seek(0, io.SeekStart)
+
+			digest := fmt.Sprintf("sha256:%x", hash.Sum(nil))
+			if err = client.CreateBlob(cmd.Context(), digest, bin); err != nil {
+				return err
+			}
+
+			modelfile = bytes.ReplaceAll(modelfile, []byte(c.Args), []byte("@"+digest))
+		}
+	}
 
 	var currentDigest string
 	var bar *progressbar.ProgressBar
 
-	request := api.CreateRequest{Name: args[0], Path: filename}
+	request := api.CreateRequest{Name: args[0], Path: filename, Modelfile: string(modelfile)}
 	fn := func(resp api.ProgressResponse) error {
 		if resp.Digest != currentDigest && resp.Digest != "" {
-			if spinner != nil {
-				spinner.Stop()
-			}
+			spinner.Stop()
 			currentDigest = resp.Digest
 			// pulling
 			bar = progressbar.DefaultBytes(
@@ -69,9 +117,7 @@ func CreateHandler(cmd *cobra.Command, args []string) error {
 			bar.Set64(resp.Completed)
 		} else {
 			currentDigest = ""
-			if spinner != nil {
-				spinner.Stop()
-			}
+			spinner.Stop()
 			spinner = NewSpinner(resp.Status)
 			go spinner.Spin(100 * time.Millisecond)
 		}
@@ -83,11 +129,9 @@ func CreateHandler(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if spinner != nil {
-		spinner.Stop()
-		if spinner.description != "success" {
-			return errors.New("unexpected end to create model")
-		}
+	spinner.Stop()
+	if spinner.description != "success" {
+		return errors.New("unexpected end to create model")
 	}
 
 	return nil
@@ -174,7 +218,7 @@ func ListHandler(cmd *cobra.Command, args []string) error {
 
 	for _, m := range models.Models {
 		if len(args) == 0 || strings.HasPrefix(m.Name, args[0]) {
-			data = append(data, []string{m.Name, m.Digest[:12], humanize.Bytes(uint64(m.Size)), format.HumanTime(m.ModifiedAt, "Never")})
+			data = append(data, []string{m.Name, m.Digest[:12], format.HumanBytes(m.Size), format.HumanTime(m.ModifiedAt, "Never")})
 		}
 	}
 
@@ -350,34 +394,49 @@ func pull(model string, insecure bool) error {
 }
 
 func RunGenerate(cmd *cobra.Command, args []string) error {
-	if len(args) > 1 {
-		// join all args into a single prompt
-		wordWrap := false
-		if term.IsTerminal(int(os.Stdout.Fd())) {
-			wordWrap = true
-		}
+	format, err := cmd.Flags().GetString("format")
+	if err != nil {
+		return err
+	}
 
-		nowrap, err := cmd.Flags().GetBool("nowordwrap")
+	prompts := args[1:]
+
+	// prepend stdin to the prompt if provided
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		in, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			return err
 		}
-		if nowrap {
-			wordWrap = false
-		}
 
-		return generate(cmd, args[0], strings.Join(args[1:], " "), wordWrap)
+		prompts = append([]string{string(in)}, prompts...)
 	}
 
-	if readline.IsTerminal(int(os.Stdin.Fd())) {
-		return generateInteractive(cmd, args[0])
+	// output is being piped
+	if !term.IsTerminal(int(os.Stdout.Fd())) {
+		return generate(cmd, args[0], strings.Join(prompts, " "), false, format)
 	}
 
-	return generateBatch(cmd, args[0])
+	wordWrap := os.Getenv("TERM") == "xterm-256color"
+
+	nowrap, err := cmd.Flags().GetBool("nowordwrap")
+	if err != nil {
+		return err
+	}
+	if nowrap {
+		wordWrap = false
+	}
+
+	// prompts are provided via stdin or args so don't enter interactive mode
+	if len(prompts) > 0 {
+		return generate(cmd, args[0], strings.Join(prompts, " "), wordWrap, format)
+	}
+
+	return generateInteractive(cmd, args[0], wordWrap, format)
 }
 
 type generateContextKey string
 
-func generate(cmd *cobra.Command, model, prompt string, wordWrap bool) error {
+func generate(cmd *cobra.Command, model, prompt string, wordWrap bool, format string) error {
 	client, err := api.ClientFromEnvironment()
 	if err != nil {
 		return err
@@ -393,7 +452,7 @@ func generate(cmd *cobra.Command, model, prompt string, wordWrap bool) error {
 		generateContext = []int{}
 	}
 
-	termWidth, _, err := term.GetSize(int(0))
+	termWidth, _, err := term.GetSize(int(os.Stdout.Fd()))
 	if err != nil {
 		wordWrap = false
 	}
@@ -414,7 +473,7 @@ func generate(cmd *cobra.Command, model, prompt string, wordWrap bool) error {
 	var currentLineLength int
 	var wordBuffer string
 
-	request := api.GenerateRequest{Model: model, Prompt: prompt, Context: generateContext}
+	request := api.GenerateRequest{Model: model, Prompt: prompt, Context: generateContext, Format: format}
 	fn := func(response api.GenerateResponse) error {
 		if !spinner.IsFinished() {
 			spinner.Finish()
@@ -485,9 +544,9 @@ func generate(cmd *cobra.Command, model, prompt string, wordWrap bool) error {
 	return nil
 }
 
-func generateInteractive(cmd *cobra.Command, model string) error {
+func generateInteractive(cmd *cobra.Command, model string, wordWrap bool, format string) error {
 	// load the model
-	if err := generate(cmd, model, "", false); err != nil {
+	if err := generate(cmd, model, "", false, ""); err != nil {
 		return err
 	}
 
@@ -508,6 +567,8 @@ func generateInteractive(cmd *cobra.Command, model string) error {
 		fmt.Fprintln(os.Stderr, "  /set nohistory    Disable history")
 		fmt.Fprintln(os.Stderr, "  /set wordwrap     Enable wordwrap")
 		fmt.Fprintln(os.Stderr, "  /set nowordwrap   Disable wordwrap")
+		fmt.Fprintln(os.Stderr, "  /set format json  Enable JSON mode")
+		fmt.Fprintln(os.Stderr, "  /set noformat     Disable formatting")
 		fmt.Fprintln(os.Stderr, "  /set verbose      Show LLM stats")
 		fmt.Fprintln(os.Stderr, "  /set quiet        Disable LLM stats")
 		fmt.Fprintln(os.Stderr, "")
@@ -533,21 +594,6 @@ func generateInteractive(cmd *cobra.Command, model string) error {
 	scanner, err := readline.New(prompt)
 	if err != nil {
 		return err
-	}
-
-	var wordWrap bool
-	termType := os.Getenv("TERM")
-	if termType == "xterm-256color" {
-		wordWrap = true
-	}
-
-	// override wrapping if the user turned it off
-	nowrap, err := cmd.Flags().GetBool("nowordwrap")
-	if err != nil {
-		return err
-	}
-	if nowrap {
-		wordWrap = false
 	}
 
 	fmt.Print(readline.StartBracketedPaste)
@@ -613,6 +659,16 @@ func generateInteractive(cmd *cobra.Command, model string) error {
 				case "quiet":
 					cmd.Flags().Set("verbose", "false")
 					fmt.Println("Set 'quiet' mode.")
+				case "format":
+					if len(args) < 3 || args[2] != "json" {
+						fmt.Println("Invalid or missing format. For 'json' mode use '/set format json'")
+					} else {
+						format = args[2]
+						fmt.Printf("Set format to '%s' mode.\n", args[2])
+					}
+				case "noformat":
+					format = ""
+					fmt.Println("Disabled format.")
 				default:
 					fmt.Printf("Unknown command '/set %s'. Type /? for help\n", args[1])
 				}
@@ -686,24 +742,11 @@ func generateInteractive(cmd *cobra.Command, model string) error {
 		}
 
 		if len(line) > 0 && line[0] != '/' {
-			if err := generate(cmd, model, line, wordWrap); err != nil {
+			if err := generate(cmd, model, line, wordWrap, format); err != nil {
 				return err
 			}
 		}
 	}
-}
-
-func generateBatch(cmd *cobra.Command, model string) error {
-	scanner := bufio.NewScanner(os.Stdin)
-	for scanner.Scan() {
-		prompt := scanner.Text()
-		fmt.Printf(">>> %s\n", prompt)
-		if err := generate(cmd, model, prompt, false); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 func RunServer(cmd *cobra.Command, _ []string) error {
@@ -883,6 +926,7 @@ func NewCLI() *cobra.Command {
 	runCmd.Flags().Bool("verbose", false, "Show timings for response")
 	runCmd.Flags().Bool("insecure", false, "Use an insecure registry")
 	runCmd.Flags().Bool("nowordwrap", false, "Don't wrap words to the next line automatically")
+	runCmd.Flags().String("format", "", "Response format (e.g. json)")
 
 	serveCmd := &cobra.Command{
 		Use:     "serve",
