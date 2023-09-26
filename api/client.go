@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -96,19 +95,11 @@ func (c *Client) do(ctx context.Context, method, path string, reqData, respData 
 	var reqBody io.Reader
 	var data []byte
 	var err error
-
-	switch reqData := reqData.(type) {
-	case io.Reader:
-		// reqData is already an io.Reader
-		reqBody = reqData
-	case nil:
-		// noop
-	default:
+	if reqData != nil {
 		data, err = json.Marshal(reqData)
 		if err != nil {
 			return err
 		}
-
 		reqBody = bytes.NewReader(data)
 	}
 
@@ -294,20 +285,5 @@ func (c *Client) Heartbeat(ctx context.Context) error {
 	if err := c.do(ctx, http.MethodHead, "/", nil, nil); err != nil {
 		return err
 	}
-	return nil
-}
-
-func (c *Client) CreateBlob(ctx context.Context, digest string, r io.Reader) error {
-	if err := c.do(ctx, http.MethodHead, fmt.Sprintf("/api/blobs/%s", digest), nil, nil); err != nil {
-		var statusError StatusError
-		if !errors.As(err, &statusError) || statusError.StatusCode != http.StatusNotFound {
-			return err
-		}
-
-		if err := c.do(ctx, http.MethodPost, fmt.Sprintf("/api/blobs/%s", digest), r, nil); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
