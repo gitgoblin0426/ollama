@@ -8,6 +8,7 @@ import (
 	"hash"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -35,6 +36,8 @@ type blobUpload struct {
 
 	context.CancelFunc
 
+	file *os.File
+
 	done       bool
 	err        error
 	references atomic.Int32
@@ -42,8 +45,8 @@ type blobUpload struct {
 
 const (
 	numUploadParts          = 64
-	minUploadPartSize int64 = 95 * 1000 * 1000
-	maxUploadPartSize int64 = 1000 * 1000 * 1000
+	minUploadPartSize int64 = 100 * format.MegaByte
+	maxUploadPartSize int64 = 1000 * format.MegaByte
 )
 
 func (b *blobUpload) Prepare(ctx context.Context, requestURL *url.URL, opts *RegistryOptions) error {
@@ -55,7 +58,7 @@ func (b *blobUpload) Prepare(ctx context.Context, requestURL *url.URL, opts *Reg
 	if b.From != "" {
 		values := requestURL.Query()
 		values.Add("mount", b.Digest)
-		values.Add("from", b.From)
+		values.Add("from", ParseModelPath(b.From).GetNamespaceRepository())
 		requestURL.RawQuery = values.Encode()
 	}
 
@@ -77,6 +80,14 @@ func (b *blobUpload) Prepare(ctx context.Context, requestURL *url.URL, opts *Reg
 
 	b.Total = fi.Size()
 
+	// http.StatusCreated indicates a blob has been mounted
+	// ref: https://distribution.github.io/distribution/spec/api/#cross-repository-blob-mount
+	if resp.StatusCode == http.StatusCreated {
+		b.Completed.Store(b.Total)
+		b.done = true
+		return nil
+	}
+
 	var size = b.Total / numUploadParts
 	switch {
 	case size < minUploadPartSize:
@@ -92,7 +103,7 @@ func (b *blobUpload) Prepare(ctx context.Context, requestURL *url.URL, opts *Reg
 		}
 
 		// set part.N to the current number of parts
-		b.Parts = append(b.Parts, blobUploadPart{blobUpload: b, N: len(b.Parts), Offset: offset, Size: size})
+		b.Parts = append(b.Parts, blobUploadPart{blobUpload: b, N: len(b.Parts), Hash: md5.New(), Offset: offset, Size: size})
 		offset += size
 	}
 
@@ -120,12 +131,12 @@ func (b *blobUpload) Run(ctx context.Context, opts *RegistryOptions) {
 		return
 	}
 
-	f, err := os.Open(p)
+	b.file, err = os.Open(p)
 	if err != nil {
 		b.err = err
 		return
 	}
-	defer f.Close()
+	defer b.file.Close()
 
 	g, inner := errgroup.WithContext(ctx)
 	g.SetLimit(numUploadParts)
@@ -137,7 +148,6 @@ func (b *blobUpload) Run(ctx context.Context, opts *RegistryOptions) {
 			g.Go(func() error {
 				var err error
 				for try := 0; try < maxRetries; try++ {
-					part.ReadSeeker = io.NewSectionReader(f, part.Offset, part.Size)
 					err = b.uploadChunk(inner, http.MethodPatch, requestURL, part, opts)
 					switch {
 					case errors.Is(err, context.Canceled):
@@ -145,7 +155,10 @@ func (b *blobUpload) Run(ctx context.Context, opts *RegistryOptions) {
 					case errors.Is(err, errMaxRetriesExceeded):
 						return err
 					case err != nil:
-						log.Printf("%s part %d attempt %d failed: %v, retrying", b.Digest[7:19], part.N, try, err)
+						part.Reset()
+						sleep := time.Second * time.Duration(math.Pow(2, float64(try)))
+						log.Printf("%s part %d attempt %d failed: %v, retrying in %s", b.Digest[7:19], part.N, try, err, sleep)
+						time.Sleep(sleep)
 						continue
 					}
 
@@ -180,29 +193,39 @@ func (b *blobUpload) Run(ctx context.Context, opts *RegistryOptions) {
 	headers.Set("Content-Type", "application/octet-stream")
 	headers.Set("Content-Length", "0")
 
-	resp, err := makeRequestWithRetry(ctx, http.MethodPut, requestURL, headers, nil, opts)
-	if err != nil {
-		b.err = err
+	for try := 0; try < maxRetries; try++ {
+		resp, err := makeRequestWithRetry(ctx, http.MethodPut, requestURL, headers, nil, opts)
+		if err != nil {
+			b.err = err
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+
+			sleep := time.Second * time.Duration(math.Pow(2, float64(try)))
+			log.Printf("%s complete upload attempt %d failed: %v, retrying in %s", b.Digest[7:19], try, err, sleep)
+			time.Sleep(sleep)
+			continue
+		}
+		defer resp.Body.Close()
+
+		b.err = nil
+		b.done = true
 		return
 	}
-	defer resp.Body.Close()
-
-	b.done = true
 }
 
 func (b *blobUpload) uploadChunk(ctx context.Context, method string, requestURL *url.URL, part *blobUploadPart, opts *RegistryOptions) error {
-	part.Reset()
-
 	headers := make(http.Header)
 	headers.Set("Content-Type", "application/octet-stream")
 	headers.Set("Content-Length", fmt.Sprintf("%d", part.Size))
-	headers.Set("X-Redirect-Uploads", "1")
 
 	if method == http.MethodPatch {
+		headers.Set("X-Redirect-Uploads", "1")
 		headers.Set("Content-Range", fmt.Sprintf("%d-%d", part.Offset, part.Offset+part.Size-1))
 	}
 
-	resp, err := makeRequest(ctx, method, requestURL, headers, io.TeeReader(part.ReadSeeker, io.MultiWriter(part, part.Hash)), opts)
+	sr := io.NewSectionReader(b.file, part.Offset, part.Size)
+	resp, err := makeRequest(ctx, method, requestURL, headers, io.TeeReader(sr, part), opts)
 	if err != nil {
 		return err
 	}
@@ -227,6 +250,7 @@ func (b *blobUpload) uploadChunk(ctx context.Context, method string, requestURL 
 			return err
 		}
 
+		// retry uploading to the redirect URL
 		for try := 0; try < maxRetries; try++ {
 			err = b.uploadChunk(ctx, http.MethodPut, redirectURL, part, nil)
 			switch {
@@ -235,7 +259,10 @@ func (b *blobUpload) uploadChunk(ctx context.Context, method string, requestURL 
 			case errors.Is(err, errMaxRetriesExceeded):
 				return err
 			case err != nil:
-				log.Printf("%s part %d attempt %d failed: %v, retrying", b.Digest[7:19], part.N, try, err)
+				part.Reset()
+				sleep := time.Second * time.Duration(math.Pow(2, float64(try)))
+				log.Printf("%s part %d attempt %d failed: %v, retrying in %s", b.Digest[7:19], part.N, try, err, sleep)
+				time.Sleep(sleep)
 				continue
 			}
 
@@ -260,7 +287,7 @@ func (b *blobUpload) uploadChunk(ctx context.Context, method string, requestURL 
 			return err
 		}
 
-		return fmt.Errorf("http status %d %s: %s", resp.StatusCode, resp.Status, body)
+		return fmt.Errorf("http status %s: %s", resp.Status, body)
 	}
 
 	if method == http.MethodPatch {
@@ -293,7 +320,7 @@ func (b *blobUpload) Wait(ctx context.Context, fn func(api.ProgressResponse)) er
 		}
 
 		fn(api.ProgressResponse{
-			Status:    fmt.Sprintf("uploading %s", b.Digest),
+			Status:    fmt.Sprintf("pushing %s", b.Digest[7:19]),
 			Digest:    b.Digest,
 			Total:     b.Total,
 			Completed: b.Completed.Load(),
@@ -314,7 +341,6 @@ type blobUploadPart struct {
 
 	written int64
 
-	io.ReadSeeker
 	*blobUpload
 }
 
@@ -322,14 +348,14 @@ func (p *blobUploadPart) Write(b []byte) (n int, err error) {
 	n = len(b)
 	p.written += int64(n)
 	p.Completed.Add(int64(n))
+	p.Hash.Write(b)
 	return n, nil
 }
 
 func (p *blobUploadPart) Reset() {
-	p.Seek(0, io.SeekStart)
 	p.Completed.Add(-int64(p.written))
 	p.written = 0
-	p.Hash = md5.New()
+	p.Hash.Reset()
 }
 
 func uploadBlob(ctx context.Context, mp ModelPath, layer *Layer, opts *RegistryOptions, fn func(api.ProgressResponse)) error {
@@ -344,7 +370,7 @@ func uploadBlob(ctx context.Context, mp ModelPath, layer *Layer, opts *RegistryO
 	default:
 		defer resp.Body.Close()
 		fn(api.ProgressResponse{
-			Status:    fmt.Sprintf("uploading %s", layer.Digest),
+			Status:    fmt.Sprintf("pushing %s", layer.Digest[7:19]),
 			Digest:    layer.Digest,
 			Total:     layer.Size,
 			Completed: layer.Size,

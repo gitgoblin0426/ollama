@@ -32,11 +32,11 @@ Create a `systemd` drop-in directory and set `Environment=OLLAMA_HOST`
 
 ```bash
 mkdir -p /etc/systemd/system/ollama.service.d
-echo "[Service]" >>/etc/systemd/system/ollama.service.d/environment.conf
+echo '[Service]' >>/etc/systemd/system/ollama.service.d/environment.conf
 ```
 
 ```bash
-echo "Environment=OLLAMA_HOST=0.0.0.0:11434" >>/etc/systemd/system/ollama.service.d/environment.conf
+echo 'Environment="OLLAMA_HOST=0.0.0.0:11434"' >>/etc/systemd/system/ollama.service.d/environment.conf
 ```
 
 Reload `systemd` and restart Ollama:
@@ -59,7 +59,7 @@ OLLAMA_ORIGINS=http://192.168.1.1:*,https://example.com ollama serve
 On Linux:
 
 ```bash
-echo "Environment=OLLAMA_ORIGINS=http://129.168.1.1:*,https://example.com" >>/etc/systemd/system/ollama.service.d/environment.conf
+echo 'Environment="OLLAMA_ORIGINS=http://129.168.1.1:*,https://example.com"' >>/etc/systemd/system/ollama.service.d/environment.conf
 ```
 
 Reload `systemd` and restart Ollama:
@@ -118,7 +118,7 @@ HTTPS_PROXY=http://proxy.example.com ollama serve
 On Linux:
 
 ```bash
-echo "Environment=HTTPS_PROXY=https://proxy.example.com" >>/etc/systemd/system/ollama.service.d/environment.conf
+echo 'Environment="HTTPS_PROXY=https://proxy.example.com"' >>/etc/systemd/system/ollama.service.d/environment.conf
 ```
 
 Reload `systemd` and restart Ollama:
@@ -130,6 +130,27 @@ systemctl restart ollama
 
 ### How do I use Ollama behind a proxy in Docker?
 
-Ollama Docker container can be configured to use a proxy by passing `-e HTTPS_PROXY=https://proxy.example.com` when starting the container. Ensure the certificate is installed as a system certificate when using HTTPS.
+The Ollama Docker container image can be configured to use a proxy by passing `-e HTTPS_PROXY=https://proxy.example.com` when starting the container.
 
 Alternatively, Docker daemon can be configured to use a proxy. Instructions are available for Docker Desktop on [macOS](https://docs.docker.com/desktop/settings/mac/#proxies), [Windows](https://docs.docker.com/desktop/settings/windows/#proxies), and [Linux](https://docs.docker.com/desktop/settings/linux/#proxies), and Docker [daemon with systemd](https://docs.docker.com/config/daemon/systemd/#httphttps-proxy).
+
+Ensure the certificate is installed as a system certificate when using HTTPS. This may require a new Docker image when using a self-signed certificate.
+
+```dockerfile
+FROM ollama/ollama
+COPY my-ca.pem /usr/local/share/ca-certificates/my-ca.crt
+RUN update-ca-certificate
+```
+
+Build and run this image:
+
+```shell
+docker build -t ollama-with-ca .
+docker run -d -e HTTPS_PROXY=https://my.proxy.example.com -p 11434:11434 ollama-with-ca
+```
+
+## How do I use Ollama with GPU acceleration in Docker?
+
+The Ollama Docker container can be configured with GPU acceleration in Linux or Windows (with WSL2). This requires the [nvidia-container-toolkit](https://github.com/NVIDIA/nvidia-container-toolkit). See [ollama/ollama](https://hub.docker.com/r/ollama/ollama) for more details.
+
+GPU acceleration is not available for Docker Desktop in macOS due to the lack of GPU passthrough and emulation.

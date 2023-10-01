@@ -71,9 +71,10 @@ func chooseRunners(workDir, runnerType string) []ModelRunner {
 	// IMPORTANT: the order of the runners in the array is the priority order
 	switch runtime.GOOS {
 	case "darwin":
-		runners = []ModelRunner{
-			{Path: path.Join(buildPath, "metal", "bin", "ollama-runner")},
-			{Path: path.Join(buildPath, "cpu", "bin", "ollama-runner")},
+		if runtime.GOARCH == "arm64" {
+			runners = []ModelRunner{{Path: path.Join(buildPath, "metal", "bin", "ollama-runner")}}
+		} else {
+			runners = []ModelRunner{{Path: path.Join(buildPath, "cpu", "bin", "ollama-runner")}}
 		}
 	case "linux":
 		runners = []ModelRunner{
@@ -225,7 +226,7 @@ type llama struct {
 }
 
 var (
-	errNvidiaSMI     = errors.New("nvidia-smi command failed")
+	errNvidiaSMI     = errors.New("warning: gpu support may not be enabled, check that you have installed GPU drivers: nvidia-smi command failed")
 	errAvailableVRAM = errors.New("not enough VRAM available, falling back to CPU only")
 )
 
@@ -338,6 +339,7 @@ func newLlama(model string, adapters []string, runners []ModelRunner, numLayers 
 		"--model", model,
 		"--ctx-size", fmt.Sprintf("%d", opts.NumCtx),
 		"--batch-size", fmt.Sprintf("%d", opts.NumBatch),
+		"--main-gpu", fmt.Sprintf("%d", opts.MainGPU),
 		"--n-gpu-layers", fmt.Sprintf("%d", numGPU),
 		"--embedding",
 	}
@@ -543,6 +545,7 @@ func (llm *llama) Predict(ctx context.Context, prevContext []int, prompt string,
 		"stream":            true,
 		"n_predict":         llm.NumPredict,
 		"n_keep":            llm.NumKeep,
+		"main_gpu":          llm.MainGPU,
 		"temperature":       llm.Temperature,
 		"top_k":             llm.TopK,
 		"top_p":             llm.TopP,
