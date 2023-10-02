@@ -10,7 +10,6 @@ docker buildx build \
     --platform=linux/arm64,linux/amd64 \
     --build-arg=VERSION \
     --build-arg=GOFLAGS \
-    --cache-from type=local,src=.cache \
     -f Dockerfile \
     -t ollama/ollama -t ollama/ollama:$VERSION \
     .

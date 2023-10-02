@@ -216,10 +216,6 @@ See the [API documentation](./docs/api.md) for all endpoints.
 
 ## Community Integrations
 
-### Mobile
-
-- [Mobile Artificial Intelligence Distribution](https://github.com/MaidFoundation/Maid) (Maid)
-
 ### Web & Desktop
 
 - [HTML UI](https://github.com/rtcfirefly/ollama-ui)
@@ -238,13 +234,12 @@ See the [API documentation](./docs/api.md) for all endpoints.
 - [Emacs client](https://github.com/zweifisch/ollama)
 - [gen.nvim](https://github.com/David-Kunz/gen.nvim)
 - [ollama.nvim](https://github.com/nomnivore/ollama.nvim)
-- [ogpt.nvim](https://github.com/huynle/ogpt.nvim)
 - [gptel Emacs client](https://github.com/karthink/gptel)
+- [ollama package for archlinux](https://archlinux.org/packages/extra/x86_64/ollama/)
 
 ### Libraries
 
 - [LangChain](https://python.langchain.com/docs/integrations/llms/ollama) and [LangChain.js](https://js.langchain.com/docs/modules/model_io/models/llms/integrations/ollama) with [example](https://js.langchain.com/docs/use_cases/question_answering/local_retrieval_qa)
-- [LangChainGo](https://github.com/tmc/langchaingo/) with [example](https://github.com/tmc/langchaingo/tree/main/examples/ollama-completion-example)
 - [LlamaIndex](https://gpt-index.readthedocs.io/en/stable/examples/llm/ollama.html)
 - [LiteLLM](https://github.com/BerriAI/litellm)
 - [OllamaSharp for .NET](https://github.com/awaescher/OllamaSharp)
@@ -253,7 +248,6 @@ See the [API documentation](./docs/api.md) for all endpoints.
 - [ModelFusion Typescript Library](https://modelfusion.dev/integration/model-provider/ollama)
 - [OllamaKit for Swift](https://github.com/kevinhermawan/OllamaKit)
 - [Ollama for Dart](https://github.com/breitburg/dart-ollama)
-- [Ollama for Laravel](https://github.com/cloudstudio/ollama-laravel)
 
 ### Mobile
 
@@ -269,4 +263,3 @@ See the [API documentation](./docs/api.md) for all endpoints.
 - [Dagger Chatbot](https://github.com/samalba/dagger-chatbot)
 - [Discord AI Bot](https://github.com/mekb-turtle/discord-ai-bot)
 - [Hass Ollama Conversation](https://github.com/ej52/hass-ollama-conversation)
-- [Rivet plugin](https://github.com/abrenneke/rivet-plugin-ollama)
