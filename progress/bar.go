@@ -42,19 +42,6 @@ func NewBar(message string, maxValue, initialValue int64) *Bar {
 	}
 }
 
-// formatDuration limits the rendering of a time.Duration to 2 units
-func formatDuration(d time.Duration) string {
-	if d >= 100*time.Hour {
-		return "99h+"
-	}
-
-	if d >= time.Hour {
-		return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
-	}
-
-	return d.Round(time.Second).String()
-}
-
 func (b *Bar) String() string {
 	termWidth, _, err := term.GetSize(int(os.Stderr.Fd()))
 	if err != nil {
@@ -78,42 +65,38 @@ func (b *Bar) String() string {
 	}
 
 	fmt.Fprintf(&pre, "%3.0f%% ", math.Floor(b.percent()))
-
 	fmt.Fprintf(&suf, "(%s/%s", format.HumanBytes(b.currentValue), format.HumanBytes(b.maxValue))
 
 	stats := b.Stats()
-	rate := stats.rate
-	if stats.value > b.initialValue && stats.value < b.maxValue {
-		fmt.Fprintf(&suf, ", %s/s", format.HumanBytes(int64(rate)))
+	rate := int64(stats.rate)
+	if rate > 0 {
+		fmt.Fprintf(&suf, ", %s/s", format.HumanBytes(rate))
 	}
 
 	fmt.Fprintf(&suf, ")")
 
 	elapsed := time.Since(b.started)
-	var timing string
-	if stats.value > b.initialValue && stats.value < b.maxValue {
-		timing = fmt.Sprintf("[%s:%s]", formatDuration(elapsed), formatDuration(stats.remaining))
+	if b.percent() < 100 && rate > 0 {
+		fmt.Fprintf(&suf, " [%s:%s]", elapsed.Round(time.Second), stats.remaining)
+	} else {
+		fmt.Fprintf(&suf, "        ")
 	}
 
-	// 44 is the maximum width for the stats on the right of the progress bar
-	if suf.Len() < 44 {
-		suf.WriteString(strings.Repeat(" ", 44-suf.Len()-len(timing)))
-	}
-
-	suf.WriteString(timing)
+	mid.WriteString("▕")
 
 	// add 3 extra spaces: 2 boundary characters and 1 space at the end
 	f := termWidth - pre.Len() - suf.Len() - 3
 	n := int(float64(f) * b.percent() / 100)
 
-	if f > 0 {
-		mid.WriteString("▕")
+	if n > 0 {
 		mid.WriteString(strings.Repeat("█", n))
-		if f-n > 0 {
-			mid.WriteString(strings.Repeat(" ", f-n))
-		}
-		mid.WriteString("▏")
 	}
+
+	if f-n > 0 {
+		mid.WriteString(strings.Repeat(" ", f-n))
+	}
+
+	mid.WriteString("▏")
 
 	return pre.String() + mid.String() + suf.String()
 }
@@ -157,8 +140,6 @@ func (b *Bar) Stats() Stats {
 		var remaining time.Duration
 		if rate > 0 {
 			remaining = time.Second * time.Duration((float64(b.maxValue-b.currentValue))/(float64(rate)))
-		} else {
-			remaining = time.Duration(math.MaxInt64)
 		}
 
 		b.stats = Stats{
