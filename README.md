@@ -216,6 +216,10 @@ See the [API documentation](./docs/api.md) for all endpoints.
 
 ## Community Integrations
 
+### Mobile
+
+- [Mobile Artificial Intelligence Distribution](https://github.com/MaidFoundation/Maid) (Maid)
+
 ### Web & Desktop
 
 - [HTML UI](https://github.com/rtcfirefly/ollama-ui)
@@ -237,6 +241,10 @@ See the [API documentation](./docs/api.md) for all endpoints.
 - [ogpt.nvim](https://github.com/huynle/ogpt.nvim)
 - [gptel Emacs client](https://github.com/karthink/gptel)
 - [Oatmeal](https://github.com/dustinblackman/oatmeal)
+
+### Installation Packages
+
+- [Package for archlinux](https://archlinux.org/packages/extra/x86_64/ollama/)
 
 ### Libraries
 
