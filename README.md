@@ -218,7 +218,7 @@ See the [API documentation](./docs/api.md) for all endpoints.
 
 ### Mobile
 
-- [Maid](https://github.com/danemadsen/Maid) (Mobile Artificial Intelligence Distribution)
+- [Maid](https://github.com/MaidFoundation/Maid) (Mobile Artificial Intelligence Distribution)
 
 ### Web & Desktop
 
@@ -229,7 +229,6 @@ See the [API documentation](./docs/api.md) for all endpoints.
 - [Web UI](https://github.com/ollama-webui/ollama-webui)
 - [Ollamac](https://github.com/kevinhermawan/Ollamac)
 - [big-AGI](https://github.com/enricoros/big-agi/blob/main/docs/config-ollama.md)
-- [Cheshire Cat assistant framework](https://github.com/cheshire-cat-ai/core)
 
 ### Terminal
 

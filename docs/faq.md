@@ -74,6 +74,8 @@ systemctl restart ollama
 - macOS: Raw model data is stored under `~/.ollama/models`.
 - Linux: Raw model data is stored under `/usr/share/ollama/.ollama/models`
 
+
+
 Below the models directory you will find a structure similar to the following:
 
 ```shell
@@ -94,42 +96,3 @@ The manifest lists all the layers used in this model. You will see a `media type
 ### How can I change where Ollama stores models?
 
 To modify where models are stored, you can use the `OLLAMA_MODELS` environment variable. Note that on Linux this means defining `OLLAMA_MODELS` in a drop-in `/etc/systemd/system/ollama.service.d` service file, reloading systemd, and restarting the ollama service.
-
-## Does Ollama send my prompts and answers back to Ollama.ai to use in any way?
-
-No. Anything you do with Ollama, such as generate a response from the model, stays with you. We don't collect any data about how you use the model. You are always in control of your own data.
-
-## How can I use Ollama in Visual Studio Code?
-
-There is already a large collection of plugins available for VSCode as well as other editors that leverage Ollama. You can see the list of [extensions & plugins](https://github.com/jmorganca/ollama#extensions--plugins) at the bottom of the main repository readme.
-
-## How do I use Ollama behind a proxy?
-
-Ollama is compatible with proxy servers if `HTTP_PROXY` or `HTTPS_PROXY` are configured. When using either variables, ensure it is set where `ollama serve` can access the values.
-
-When using `HTTPS_PROXY`, ensure the proxy certificate is installed as a system certificate.
-
-On macOS:
-
-```bash
-HTTPS_PROXY=http://proxy.example.com ollama serve
-```
-
-On Linux:
-
-```bash
-echo "Environment=HTTPS_PROXY=https://proxy.example.com" >>/etc/systemd/system/ollama.service.d/environment.conf
-```
-
-Reload `systemd` and restart Ollama:
-
-```bash
-systemctl daemon-reload
-systemctl restart ollama
-```
-
-### How do I use Ollama behind a proxy in Docker?
-
-Ollama Docker container can be configured to use a proxy by passing `-e HTTPS_PROXY=https://proxy.example.com` when starting the container. Ensure the certificate is installed as a system certificate when using HTTPS.
-
-Alternatively, Docker daemon can be configured to use a proxy. Instructions are available for Docker Desktop on [macOS](https://docs.docker.com/desktop/settings/mac/#proxies), [Windows](https://docs.docker.com/desktop/settings/windows/#proxies), and [Linux](https://docs.docker.com/desktop/settings/linux/#proxies), and Docker [daemon with systemd](https://docs.docker.com/config/daemon/systemd/#httphttps-proxy).
