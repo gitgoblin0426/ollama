@@ -23,24 +23,26 @@ type containerGGUF struct {
 		NumTensor uint64
 		NumKV     uint64
 	}
+
+	parameters uint64
 }
 
 func (c *containerGGUF) Name() string {
 	return "gguf"
 }
 
-func (c *containerGGUF) Decode(ro *readOffset) (model, error) {
-	binary.Read(ro, c.bo, &c.Version)
+func (c *containerGGUF) Decode(r io.Reader) (model, error) {
+	binary.Read(r, c.bo, &c.Version)
 
 	switch c.Version {
 	case 1:
-		binary.Read(ro, c.bo, &c.V1)
+		binary.Read(r, c.bo, &c.V1)
 	default:
-		binary.Read(ro, c.bo, &c.V2)
+		binary.Read(r, c.bo, &c.V2)
 	}
 
 	model := newGGUFModel(c)
-	if err := model.Decode(ro); err != nil {
+	if err := model.Decode(r); err != nil {
 		return nil, err
 	}
 
@@ -65,23 +67,9 @@ const (
 
 type kv map[string]any
 
-type tensor struct {
-	name   string
-	kind   uint32
-	offset uint64
-	size   uint64
-
-	// shape is the number of elements in each dimension
-	shape [4]uint64
-}
-
 type ggufModel struct {
 	*containerGGUF
-
 	kv
-	tensors []tensor
-
-	parameters uint64
 }
 
 func newGGUFModel(container *containerGGUF) *ggufModel {
@@ -154,49 +142,49 @@ func (llm *ggufModel) FileType() string {
 	return "unknown"
 }
 
-func (llm *ggufModel) Decode(ro *readOffset) error {
+func (llm *ggufModel) Decode(r io.Reader) error {
 	// decode key-values
 	for i := 0; uint64(i) < llm.NumKV(); i++ {
-		k, err := llm.readString(ro)
+		k, err := llm.readString(r)
 		if err != nil {
 			return err
 		}
 
-		vtype := llm.readU32(ro)
+		vtype := llm.readU32(r)
 
 		var v any
 		switch vtype {
 		case ggufTypeUint8:
-			v = llm.readU8(ro)
+			v = llm.readU8(r)
 		case ggufTypeInt8:
-			v = llm.readI8(ro)
+			v = llm.readI8(r)
 		case ggufTypeUint16:
-			v = llm.readU16(ro)
+			v = llm.readU16(r)
 		case ggufTypeInt16:
-			v = llm.readI16(ro)
+			v = llm.readI16(r)
 		case ggufTypeUint32:
-			v = llm.readU32(ro)
+			v = llm.readU32(r)
 		case ggufTypeInt32:
-			v = llm.readI32(ro)
+			v = llm.readI32(r)
 		case ggufTypeUint64:
-			v = llm.readU64(ro)
+			v = llm.readU64(r)
 		case ggufTypeInt64:
-			v = llm.readI64(ro)
+			v = llm.readI64(r)
 		case ggufTypeFloat32:
-			v = llm.readF32(ro)
+			v = llm.readF32(r)
 		case ggufTypeFloat64:
-			v = llm.readF64(ro)
+			v = llm.readF64(r)
 		case ggufTypeBool:
-			v = llm.readBool(ro)
+			v = llm.readBool(r)
 		case ggufTypeString:
-			s, err := llm.readString(ro)
+			s, err := llm.readString(r)
 			if err != nil {
 				return err
 			}
 
 			v = s
 		case ggufTypeArray:
-			a, err := llm.readArray(ro)
+			a, err := llm.readArray(r)
 			if err != nil {
 				return err
 			}
@@ -211,84 +199,21 @@ func (llm *ggufModel) Decode(ro *readOffset) error {
 
 	// decode tensors
 	for i := 0; uint64(i) < llm.NumTensor(); i++ {
-		name, err := llm.readString(ro)
-		if err != nil {
+		if _, err := llm.readString(r); err != nil {
 			return err
 		}
 
-		dims := llm.readU32(ro)
+		dimensions := llm.readU32(r)
 
-		shape := [4]uint64{1, 1, 1, 1}
-		for i := 0; uint32(i) < dims; i++ {
-			shape[i] = llm.readU64(ro)
+		var elements uint64 = 1
+		for i := 0; uint32(i) < dimensions; i++ {
+			elements *= llm.readU64(r)
 		}
 
-		kind := llm.readU32(ro)
-		offset := llm.readU64(ro)
+		llm.readU32(r) // type
+		llm.readU64(r) // offset
 
-		var blockSize uint64
-		switch {
-		case kind < 2:
-			blockSize = 1
-		case kind < 10:
-			blockSize = 32
-		default:
-			blockSize = 256
-		}
-
-		var typeSize uint64
-		switch kind {
-		case 0: // FP32
-			typeSize = 4
-		case 1: // FP16
-			typeSize = 2
-		case 2: // Q4_0
-			typeSize = 2 + blockSize/2
-		case 3: // Q4_1
-			typeSize = 2 + 2 + blockSize/2
-		case 6: // Q5_0
-			typeSize = 2 + 4 + blockSize/2
-		case 7: // Q5_1
-			typeSize = 2 + 2 + 4 + blockSize/2
-		case 8: // Q8_0
-			typeSize = 2 + blockSize
-		case 9: // Q8_1
-			typeSize = 4 + 4 + blockSize
-		case 10: // Q2_K
-			typeSize = blockSize/16 + blockSize/4 + 2 + 2
-		case 11: // Q3_K
-			typeSize = blockSize/8 + blockSize/4 + 12 + 2
-		case 12: // Q4_K
-			typeSize = 2 + 2 + 12 + blockSize/2
-		case 13: // Q5_K
-			typeSize = 2 + 2 + 12 + blockSize/8 + blockSize/2
-		case 14: // Q6_K
-			typeSize = blockSize/2 + blockSize/4 + blockSize/16 + 2
-		}
-
-		parameters := shape[0] * shape[1] * shape[2] * shape[3]
-		size := parameters * typeSize / blockSize
-
-		llm.tensors = append(llm.tensors, tensor{
-			name:   name,
-			kind:   kind,
-			offset: offset,
-			size:   size,
-			shape:  shape,
-		})
-
-		llm.parameters += parameters
-	}
-
-	alignment, ok := llm.kv["general.alignment"].(uint32)
-	if !ok {
-		alignment = 32
-	}
-
-	io.CopyN(io.Discard, ro, int64(alignment)-ro.offset%int64(alignment))
-	for _, tensor := range llm.tensors {
-		padded := (int64(tensor.size) + int64(alignment) - 1) & ^(int64(alignment) - 1)
-		io.CopyN(io.Discard, ro, padded)
+		llm.parameters += elements
 	}
 
 	return nil
