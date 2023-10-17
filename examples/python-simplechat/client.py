@@ -15,6 +15,8 @@ def chat(messages):
 
     for line in r.iter_lines():
         body = json.loads(line)
+        if "error" in body:
+            raise Exception(body["error"])
         if body.get("done") is False:
             message = body.get("message", "")
             content = message.get("content", "")
@@ -22,8 +24,6 @@ def chat(messages):
             # the response streams one token at a time, print that as we receive it
             print(content, end="", flush=True)
 
-        if "error" in body:
-            raise Exception(body["error"])
 
         if body.get("done", False):
             message["content"] = output
@@ -32,6 +32,7 @@ def chat(messages):
 
 def main():
     messages = []
+    
     while True:
         user_input = input("Enter a prompt: ")
         print()
