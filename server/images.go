@@ -58,21 +58,18 @@ type PromptVars struct {
 
 func (m *Model) Prompt(p PromptVars) (string, error) {
 	var prompt strings.Builder
-	// Use the "missingkey=zero" option to handle missing variables without panicking
-	tmpl, err := template.New("").Option("missingkey=zero").Parse(m.Template)
+	tmpl, err := template.New("").Parse(m.Template)
 	if err != nil {
 		return "", err
 	}
 
-	vars := map[string]any{
-		"System":   p.System,
-		"Prompt":   p.Prompt,
-		"Response": p.Response,
-		"First":    p.First,
+	if p.System == "" {
+		// use the default system prompt for this model if one is not specified
+		p.System = m.System
 	}
 
 	var sb strings.Builder
-	if err := tmpl.Execute(&sb, vars); err != nil {
+	if err := tmpl.Execute(&sb, p); err != nil {
 		return "", err
 	}
 	prompt.WriteString(sb.String())

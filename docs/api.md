@@ -3,7 +3,6 @@
 ## Endpoints
 
 - [Generate a completion](#generate-a-completion)
-- [Send Chat Messages](#send-chat-messages)
 - [Create a Model](#create-a-model)
 - [List Local Models](#list-local-models)
 - [Show Model Information](#show-model-information)
@@ -292,7 +291,6 @@ curl http://localhost:11434/api/generate -d '{
 ```
 
 ## Send Chat Messages
-
 ```shell
 POST /api/chat
 ```
@@ -314,11 +312,10 @@ Advanced parameters (optional):
 ### Examples
 
 #### Request
-
 Send a chat message with a streaming response.
 
 ```shell
-curl http://localhost:11434/api/chat -d '{
+curl http://localhost:11434/api/generate -d '{
   "model": "llama2",
   "messages": [
     {
@@ -364,11 +361,10 @@ Final response:
 ```
 
 #### Request (With History)
-
 Send a chat message with a conversation history.
 
 ```shell
-curl http://localhost:11434/api/chat -d '{
+curl http://localhost:11434/api/generate -d '{
   "model": "llama2",
   "messages": [
     {
