@@ -714,11 +714,11 @@ func generateInteractive(cmd *cobra.Command, opts generateOptions) error {
 			case MultilineSystem:
 				opts.System = prompt
 				prompt = ""
-				fmt.Println("Set system template.")
+				fmt.Println("Set system template.\n")
 			case MultilineTemplate:
 				opts.Template = prompt
 				prompt = ""
-				fmt.Println("Set model template.")
+				fmt.Println("Set model template.\n")
 			}
 			multiline = MultilineNone
 		case strings.HasPrefix(line, `"""`) && len(prompt) == 0:
@@ -793,9 +793,9 @@ func generateInteractive(cmd *cobra.Command, opts generateOptions) error {
 						if found {
 							opts.System = prompt
 							if args[1] == "system" {
-								fmt.Println("Set system template.")
+								fmt.Println("Set system template.\n")
 							} else {
-								fmt.Println("Set prompt template.")
+								fmt.Println("Set prompt template.\n")
 							}
 							prompt = ""
 						} else {
@@ -809,7 +809,7 @@ func generateInteractive(cmd *cobra.Command, opts generateOptions) error {
 						}
 					} else {
 						opts.System = line
-						fmt.Println("Set system template.")
+						fmt.Println("Set system template.\n")
 					}
 				default:
 					fmt.Printf("Unknown command '/set %s'. Type /? for help\n", args[1])
