@@ -57,7 +57,6 @@ Here are some example open-source models that can be downloaded:
 | Llama 2 70B        | 70B        | 39GB  | `ollama run llama2:70b`        |
 | Orca Mini          | 3B         | 1.9GB | `ollama run orca-mini`         |
 | Vicuna             | 7B         | 3.8GB | `ollama run vicuna`            |
-| LLaVA              | 7B         | 4.5GB | `ollama run llava`             |
 
 > Note: You should have at least 8 GB of RAM to run the 3B models, 16 GB to run the 7B models, and 32 GB to run the 13B models.
 
@@ -159,13 +158,6 @@ For multiline input, you can wrap text with `"""`:
 I'm a basic program that prints the famous "Hello, world!" message to the console.
 ```
 
-### Multimodal models
-
-```
->>> What's in this image? /Users/jmorgan/Desktop/smile.png
-The image features a yellow smiley face, which is likely the central focus of the picture.
-```
-
 ### Pass in prompt as arguments
 
 ```
@@ -239,7 +231,7 @@ See the [API documentation](./docs/api.md) for all endpoints.
 ## Community Integrations
 
 ### Web & Desktop
-- [Bionic GPT](https://github.com/bionic-gpt/bionic-gpt)
+
 - [HTML UI](https://github.com/rtcfirefly/ollama-ui)
 - [Chatbot UI](https://github.com/ivanfioravanti/chatbot-ollama)
 - [Typescript UI](https://github.com/ollama-interface/Ollama-Gui?tab=readme-ov-file)
@@ -286,8 +278,7 @@ See the [API documentation](./docs/api.md) for all endpoints.
 
 ### Mobile
 
-- [Enchanted](https://github.com/AugustDev/enchanted)
-- [Maid](https://github.com/danemadsen/Maid)
+- [Maid](https://github.com/danemadsen/Maid) (Mobile Artificial Intelligence Distribution)
 
 ### Extensions & Plugins
 

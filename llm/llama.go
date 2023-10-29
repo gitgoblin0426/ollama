@@ -548,12 +548,17 @@ const maxBufferSize = 512 * format.KiloByte
 const maxRetries = 6
 
 type PredictOpts struct {
-	Prompt string
-	Format string
-	Images []api.ImageData
+	Prompt           string
+	Format           string
+	Images           []api.ImageData
+	CheckpointStart  time.Time
+	CheckpointLoaded time.Time
 }
 
 type PredictResult struct {
+	CreatedAt          time.Time
+	TotalDuration      time.Duration
+	LoadDuration       time.Duration
 	Content            string
 	Done               bool
 	PromptEvalCount    int
@@ -676,12 +681,16 @@ func (llm *llama) Predict(ctx context.Context, predict PredictOpts, fn func(Pred
 
 				if p.Content != "" {
 					fn(PredictResult{
-						Content: p.Content,
+						CreatedAt: time.Now().UTC(),
+						Content:   p.Content,
 					})
 				}
 
 				if p.Stop {
 					fn(PredictResult{
+						CreatedAt:     time.Now().UTC(),
+						TotalDuration: time.Since(predict.CheckpointStart),
+
 						Done:               true,
 						PromptEvalCount:    p.Timings.PromptN,
 						PromptEvalDuration: parseDurationMs(p.Timings.PromptMS),
