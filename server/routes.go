@@ -25,7 +25,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/jmorganca/ollama/api"
-	"github.com/jmorganca/ollama/gpu"
 	"github.com/jmorganca/ollama/llm"
 	"github.com/jmorganca/ollama/parser"
 	"github.com/jmorganca/ollama/version"
@@ -82,6 +81,20 @@ func load(c *gin.Context, modelName string, reqOpts map[string]interface{}, sess
 		return nil, err
 	}
 
+	ctx := c.Request.Context()
+
+	// check if the loaded model is still running in a subprocess, in case something unexpected happened
+	if loaded.runner != nil {
+		if err := loaded.runner.Ping(ctx); err != nil {
+			log.Print("loaded llm process not responding, closing now")
+			// the subprocess is no longer running, so close it
+			loaded.runner.Close()
+			loaded.runner = nil
+			loaded.Model = nil
+			loaded.Options = nil
+		}
+	}
+
 	needLoad := loaded.runner == nil || // is there a model loaded?
 		loaded.ModelPath != model.ModelPath || // has the base model changed?
 		!reflect.DeepEqual(loaded.AdapterPaths, model.AdapterPaths) || // have the adapters changed?
@@ -101,7 +114,7 @@ func load(c *gin.Context, modelName string, reqOpts map[string]interface{}, sess
 			// some older models are not compatible with newer versions of llama.cpp
 			// show a generalized compatibility error until there is a better way to
 			// check for model compatibility
-			if errors.Is(llm.ErrUnsupportedFormat, err) || strings.Contains(err.Error(), "failed to load model") {
+			if strings.Contains(err.Error(), "failed to load model") {
 				err = fmt.Errorf("%v: this model may be incompatible with your version of Ollama. If you previously pulled this model, try updating it by running `ollama pull %s`", err, model.ShortName)
 			}
 
@@ -112,6 +125,10 @@ func load(c *gin.Context, modelName string, reqOpts map[string]interface{}, sess
 		loaded.runner = llmRunner
 		loaded.Options = &opts
 	}
+
+	// update options for the loaded llm
+	// TODO(mxyng): this isn't thread safe, but it should be fine for now
+	loaded.runner.SetOptions(opts)
 
 	loaded.expireAt = time.Now().Add(sessionDuration)
 
@@ -892,12 +909,9 @@ func Serve(ln net.Listener) error {
 		os.Exit(0)
 	}()
 
-	if err := llm.Init(s.WorkDir); err != nil {
-		return fmt.Errorf("unable to initialize llm library %w", err)
-	}
-	if runtime.GOOS == "linux" { // TODO - windows too
+	if runtime.GOOS == "linux" {
 		// check compatibility to log warnings
-		if _, err := gpu.CheckVRAM(); err != nil {
+		if _, err := llm.CheckVRAM(); err != nil {
 			log.Print(err.Error())
 		}
 	}
