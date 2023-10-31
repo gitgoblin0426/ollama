@@ -286,6 +286,7 @@ curl http://localhost:11434/api/generate -d '{
     "main_gpu": 0,
     "low_vram": false,
     "f16_kv": true,
+    "logits_all": false,
     "vocab_only": false,
     "use_mmap": true,
     "use_mlock": false,
