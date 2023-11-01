@@ -17,7 +17,7 @@ Get up and running with large language models locally.
 
 ### Windows
 
-Coming soon! For now, you can install Ollama on Windows via WSL2.
+Coming soon!
 
 ### Linux & WSL2
 
@@ -47,11 +47,10 @@ Here are some example open-source models that can be downloaded:
 
 | Model              | Parameters | Size  | Download                       |
 | ------------------ | ---------- | ----- | ------------------------------ |
-| Llama 2            | 7B         | 3.8GB | `ollama run llama2`            |
-| Mistral            | 7B         | 4.1GB | `ollama run mistral`           |
-| Phi-2              | 2.7B       | 1.7GB | `ollama run phi`               |
 | Neural Chat        | 7B         | 4.1GB | `ollama run neural-chat`       |
 | Starling           | 7B         | 4.1GB | `ollama run starling-lm`       |
+| Mistral            | 7B         | 4.1GB | `ollama run mistral`           |
+| Llama 2            | 7B         | 3.8GB | `ollama run llama2`            |
 | Code Llama         | 7B         | 3.8GB | `ollama run codellama`         |
 | Llama 2 Uncensored | 7B         | 3.8GB | `ollama run llama2-uncensored` |
 | Llama 2 13B        | 13B        | 7.3GB | `ollama run llama2:13b`        |
@@ -192,13 +191,19 @@ Install `cmake` and `go`:
 brew install cmake go
 ```
 
-Then generate dependencies and build:
-
+Then generate dependencies:
 ```
 go generate ./...
+```
+Then build the binary:
+```
 go build .
 ```
 
+More detailed instructions can be found in the [developer guide](https://github.com/jmorganca/ollama/blob/main/docs/development.md)
+
+
+### Running local builds
 Next, start the server:
 
 ```
@@ -285,7 +290,6 @@ See the [API documentation](./docs/api.md) for all endpoints.
 - [OllamaKit for Swift](https://github.com/kevinhermawan/OllamaKit)
 - [Ollama for Dart](https://github.com/breitburg/dart-ollama)
 - [Ollama for Laravel](https://github.com/cloudstudio/ollama-laravel)
-- [LangChainDart](https://github.com/davidmigloz/langchain_dart)
 
 ### Mobile
 
