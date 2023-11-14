@@ -76,10 +76,6 @@ configure_systemd() {
         status "Creating ollama user..."
         $SUDO useradd -r -s /bin/false -m -d /usr/share/ollama ollama
     fi
-    if getent group render >/dev/null 2>&1; then
-        status "Adding ollama user to render group..."
-        $SUDO usermod -a -G render ollama
-    fi
 
     status "Adding current user to ollama group..."
     $SUDO usermod -a -G ollama $(whoami)
