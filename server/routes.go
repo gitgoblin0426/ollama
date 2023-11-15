@@ -837,7 +837,6 @@ func (s *Server) GenerateRoutes() http.Handler {
 
 	config := cors.DefaultConfig()
 	config.AllowWildcard = true
-	config.AllowBrowserExtensions = true
 
 	config.AllowOrigins = origins
 	for _, allowOrigin := range defaultAllowOrigins {
