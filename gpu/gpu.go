@@ -28,9 +28,6 @@ type handles struct {
 var gpuMutex sync.Mutex
 var gpuHandles *handles = nil
 
-// TODO verify this is the correct min version
-const CudaComputeMajorMin = 5
-
 // Note: gpuMutex must already be held
 func initGPUHandles() {
 	// TODO - if the ollama build is CPU only, don't do these checks as they're irrelevant and confusing
@@ -76,18 +73,7 @@ func GetGPUInfo() GpuInfo {
 			log.Printf("error looking up CUDA GPU memory: %s", C.GoString(memInfo.err))
 			C.free(unsafe.Pointer(memInfo.err))
 		} else {
-			// Verify minimum compute capability
-			var cc C.cuda_compute_capability_t
-			C.cuda_compute_capability(*gpuHandles.cuda, &cc)
-			if cc.err != nil {
-				log.Printf("error looking up CUDA GPU compute capability: %s", C.GoString(cc.err))
-				C.free(unsafe.Pointer(cc.err))
-			} else if cc.major >= CudaComputeMajorMin {
-				log.Printf("CUDA Compute Capability detected: %d.%d", cc.major, cc.minor)
-				resp.Library = "cuda"
-			} else {
-				log.Printf("CUDA GPU is too old. Falling back to CPU mode. Compute Capability detected: %d.%d", cc.major, cc.minor)
-			}
+			resp.Library = "cuda"
 		}
 	} else if gpuHandles.rocm != nil {
 		C.rocm_check_vram(*gpuHandles.rocm, &memInfo)
