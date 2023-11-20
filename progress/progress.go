@@ -77,7 +77,7 @@ func (p *Progress) Add(key string, state State) {
 	p.states = append(p.states, state)
 }
 
-func (p *Progress) render() {
+func (p *Progress) render() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -101,6 +101,8 @@ func (p *Progress) render() {
 	}
 
 	p.pos = len(p.states)
+
+	return nil
 }
 
 func (p *Progress) start() {

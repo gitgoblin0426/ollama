@@ -11,7 +11,7 @@ func handleCharCtrlZ(fd int, termios *Termios) (string, error) {
 		return "", err
 	}
 
-	_ = syscall.Kill(0, syscall.SIGSTOP)
+	syscall.Kill(0, syscall.SIGSTOP)
 
 	// on resume...
 	return "", nil

@@ -198,8 +198,7 @@ func GenerateHandler(c *gin.Context) {
 		c.JSON(http.StatusOK, api.GenerateResponse{
 			CreatedAt: time.Now().UTC(),
 			Model:     req.Model,
-			Done:      true,
-		})
+			Done:      true})
 		return
 	}
 
@@ -711,7 +710,7 @@ func GetModelInfo(req api.ShowRequest) (*api.ShowResponse, error) {
 
 func ListModelsHandler(c *gin.Context) {
 	models := make([]api.ModelResponse, 0)
-	manifestsPath, err := GetManifestPath()
+	fp, err := GetManifestPath()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -741,15 +740,13 @@ func ListModelsHandler(c *gin.Context) {
 
 	walkFunc := func(path string, info os.FileInfo, _ error) error {
 		if !info.IsDir() {
-			path, tag := filepath.Split(path)
-			model := strings.Trim(strings.TrimPrefix(path, manifestsPath), string(os.PathSeparator))
-			modelPath := strings.Join([]string{model, tag}, ":")
-			canonicalModelPath := strings.ReplaceAll(modelPath, string(os.PathSeparator), "/")
+			dir, file := filepath.Split(path)
+			dir = strings.Trim(strings.TrimPrefix(dir, fp), string(os.PathSeparator))
+			tag := strings.Join([]string{dir, file}, ":")
 
-			resp, err := modelResponse(canonicalModelPath)
+			resp, err := modelResponse(tag)
 			if err != nil {
-				log.Printf("skipping file: %s", canonicalModelPath)
-				// nolint: nilerr
+				log.Printf("skipping file: %s", fp)
 				return nil
 			}
 
@@ -760,7 +757,7 @@ func ListModelsHandler(c *gin.Context) {
 		return nil
 	}
 
-	if err := filepath.Walk(manifestsPath, walkFunc); err != nil {
+	if err := filepath.Walk(fp, walkFunc); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
