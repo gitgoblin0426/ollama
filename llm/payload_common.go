@@ -3,13 +3,13 @@ package llm
 import (
 	"errors"
 	"fmt"
-	"golang.org/x/exp/slices"
 	"io"
 	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/jmorganca/ollama/gpu"
@@ -27,6 +27,13 @@ func getDynLibs(gpuInfo gpu.GpuInfo) []string {
 	// Short circuit if we know we're using the default built-in (darwin only)
 	if gpuInfo.Library == "default" {
 		return []string{"default"}
+	}
+	// TODO - temporary until we have multiple CPU variations for Darwin
+	// Short circuit on darwin with metal only
+	if len(availableDynLibs) == 1 {
+		if _, onlyMetal := availableDynLibs["metal"]; onlyMetal {
+			return []string{availableDynLibs["metal"]}
+		}
 	}
 
 	exactMatch := ""
@@ -76,7 +83,7 @@ func getDynLibs(gpuInfo gpu.GpuInfo) []string {
 		}
 	}
 
-	// Finally, if we didn't find any matches, LCD CPU FTW
+	// Finaly, if we didn't find any matches, LCD CPU FTW
 	if len(dynLibs) == 0 {
 		dynLibs = []string{availableDynLibs["cpu"]}
 	}
