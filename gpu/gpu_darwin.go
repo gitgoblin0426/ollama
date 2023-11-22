@@ -32,15 +32,8 @@ func CheckVRAM() (int64, error) {
 
 func GetGPUInfo() GpuInfo {
 	mem, _ := getCPUMem()
-	if runtime.GOARCH == "amd64" {
-		return GpuInfo{
-			Library: "default",
-			Variant: GetCPUVariant(),
-			memInfo: mem,
-		}
-	}
 	return GpuInfo{
-		Library: "metal",
+		Library: "default",
 		memInfo: mem,
 	}
 }
@@ -51,4 +44,8 @@ func getCPUMem() (memInfo, error) {
 		FreeMemory:  0,
 		DeviceCount: 0,
 	}, nil
+}
+
+func nativeInit() error {
+	return nil
 }
