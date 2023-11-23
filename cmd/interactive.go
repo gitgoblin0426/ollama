@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -42,16 +43,16 @@ func modelIsMultiModal(cmd *cobra.Command, name string) bool {
 	return slices.Contains(resp.Details.Families, "clip")
 }
 
-func generateInteractive(cmd *cobra.Command, opts runOptions) error {
+func generateInteractive(cmd *cobra.Command, opts generateOptions) error {
 	multiModal := modelIsMultiModal(cmd, opts.Model)
 
 	// load the model
-	loadOpts := runOptions{
-		Model:    opts.Model,
-		Prompt:   "",
-		Messages: []api.Message{},
+	loadOpts := generateOptions{
+		Model:  opts.Model,
+		Prompt: "",
+		Images: []ImageData{},
 	}
-	if _, err := chat(cmd, loadOpts); err != nil {
+	if err := generate(cmd, loadOpts); err != nil {
 		return err
 	}
 
@@ -140,7 +141,6 @@ func generateInteractive(cmd *cobra.Command, opts runOptions) error {
 
 	var sb strings.Builder
 	var multiline MultilineState
-	opts.Messages = make([]api.Message, 0)
 
 	for {
 		line, err := scanner.Readline()
@@ -409,26 +409,22 @@ func generateInteractive(cmd *cobra.Command, opts runOptions) error {
 		}
 
 		if sb.Len() > 0 && multiline == MultilineNone {
-			newMessage := api.Message{Role: "user", Content: sb.String()}
-
+			opts.Prompt = sb.String()
 			if multiModal {
-				msg, images, err := extractFileData(sb.String())
+				newPrompt, images, err := extractFileData(sb.String())
 				if err != nil {
 					return err
 				}
-				newMessage.Content = msg
+				opts.Prompt = newPrompt
 
 				// reset the context if we find another image
 				if len(images) > 0 {
-					newMessage.Images = append(newMessage.Images, images...)
-					// reset the context for the new image
-					opts.Messages = []api.Message{}
-				} else {
-					if len(opts.Messages) > 1 {
-						newMessage.Images = append(newMessage.Images, opts.Messages[len(opts.Messages)-2].Images...)
-					}
+					opts.Images = images
+					ctx := cmd.Context()
+					ctx = context.WithValue(ctx, generateContextKey("context"), []int{})
+					cmd.SetContext(ctx)
 				}
-				if len(newMessage.Images) == 0 {
+				if len(opts.Images) == 0 {
 					fmt.Println("This model requires you to add a jpeg, png, or svg image.")
 					fmt.Println()
 					sb.Reset()
@@ -436,17 +432,8 @@ func generateInteractive(cmd *cobra.Command, opts runOptions) error {
 				}
 			}
 
-			if opts.System != "" {
-				opts.Messages = append(opts.Messages, api.Message{Role: "system", Content: opts.System})
-			}
-			opts.Messages = append(opts.Messages, newMessage)
-
-			assistant, err := chat(cmd, opts)
-			if err != nil {
+			if err := generate(cmd, opts); err != nil {
 				return err
-			}
-			if assistant != nil {
-				opts.Messages = append(opts.Messages, *assistant)
 			}
 
 			sb.Reset()
@@ -489,9 +476,9 @@ func extractFileNames(input string) []string {
 	return re.FindAllString(input, -1)
 }
 
-func extractFileData(input string) (string, []api.ImageData, error) {
+func extractFileData(input string) (string, []ImageData, error) {
 	filePaths := extractFileNames(input)
-	var imgs []api.ImageData
+	var imgs []ImageData
 
 	for _, fp := range filePaths {
 		nfp := normalizeFilePath(fp)
