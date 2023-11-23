@@ -109,9 +109,8 @@ Remove the ollama binary from your bin directory (either `/usr/local/bin`, `/usr
 sudo rm $(which ollama)
 ```
 
-Remove the downloaded models and Ollama service user and group:
+Remove the downloaded models and Ollama service user:
 ```bash
 sudo rm -r /usr/share/ollama
 sudo userdel ollama
-sudo groupdel ollama
 ```
