@@ -8,15 +8,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        arch: [amd64, arm64]
-        exclude:
-          - os: ubuntu-latest
-            arch: arm64
-          - os: windows-latest
-            arch: arm64
     runs-on: ${{ matrix.os }}
-    env:
-      GOARCH: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v4
@@ -41,7 +33,7 @@ jobs:
       - run: go generate -x ./...
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.os }}-${{ matrix.arch }}-libraries
+          name: ${{ matrix.os }}-libraries
           path: |
             llm/llama.cpp/build/**/lib/*
   lint:
@@ -49,18 +41,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        arch: [amd64, arm64]
-        exclude:
-          - os: ubuntu-latest
-            arch: arm64
-          - os: windows-latest
-            arch: arm64
-          - os: macos-latest
-            arch: amd64
     runs-on: ${{ matrix.os }}
-    env:
-      GOARCH: ${{ matrix.arch }}
-      CGO_ENABLED: "1"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -71,7 +52,7 @@ jobs:
           cache: false
       - uses: actions/download-artifact@v4
         with:
-          name: ${{ matrix.os }}-${{ matrix.arch }}-libraries
+          name: ${{ matrix.os }}-libraries
           path: llm/llama.cpp/build
       - uses: golangci/golangci-lint-action@v3
   test:
@@ -79,12 +60,6 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        arch: [amd64, arm64]
-        exclude:
-          - os: ubuntu-latest
-            arch: arm64
-          - os: windows-latest
-            arch: arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -97,7 +72,7 @@ jobs:
       - run: go get
       - uses: actions/download-artifact@v4
         with:
-          name: ${{ matrix.os }}-${{ matrix.arch }}-libraries
+          name: ${{ matrix.os }}-libraries
           path: llm/llama.cpp/build
       - run: go build
       - run: go test -v ./...
