@@ -5,8 +5,7 @@ $ErrorActionPreference = "Stop"
 function init_vars {
     $script:llamacppDir = "../llama.cpp"
     $script:cmakeDefs = @("-DBUILD_SHARED_LIBS=on", "-DLLAMA_NATIVE=off",  "-A","x64")
-    $script:cmakeTargets = @("ext_server")
-    $script:ARCH = "amd64" # arm not yet supported.
+    $script:cmakeTargets = @("ggml", "ggml_static", "llama", "build_info", "common", "ext_server_shared", "llava_static")
     if ($env:CGO_CFLAGS -contains "-g") {
         $script:cmakeDefs += @("-DCMAKE_VERBOSE_MAKEFILE=on", "-DLLAMA_SERVER_VERBOSE=on")
         $script:config = "RelWithDebInfo"
@@ -14,17 +13,6 @@ function init_vars {
         $script:cmakeDefs += @("-DLLAMA_SERVER_VERBOSE=off")
         $script:config = "Release"
     }
-    # Try to find the CUDA dir
-    if ($env:CUDA_LIB_DIR -eq $null) {
-        $d=(get-command -ea 'silentlycontinue' nvcc).path
-        if ($d -ne $null) {
-            $script:CUDA_LIB_DIR=($d| split-path -parent)
-        }
-    } else {
-        $script:CUDA_LIB_DIR=$env:CUDA_LIB_DIR
-    }
-    $script:BZIP2=(get-command -ea 'silentlycontinue' bzip2).path
-    $script:DUMPBIN=(get-command -ea 'silentlycontinue' dumpbin).path
 }
 
 function git_module_setup {
@@ -59,25 +47,11 @@ function build {
 function install {
     rm -ea 0 -recurse -force -path "${script:buildDir}/lib"
     md "${script:buildDir}/lib" -ea 0 > $null
-    cp "${script:buildDir}/bin/${script:config}/ext_server.dll" "${script:buildDir}/lib"
+    cp "${script:buildDir}/bin/${script:config}/ext_server_shared.dll" "${script:buildDir}/lib"
     cp "${script:buildDir}/bin/${script:config}/llama.dll" "${script:buildDir}/lib"
 
     # Display the dll dependencies in the build log
-    if ($script:DUMPBIN -ne $null) {
-        & "$script:DUMPBIN" /dependents "${script:buildDir}/bin/${script:config}/ext_server.dll" | select-string ".dll"
-    }
-}
-
-function compress_libs {
-    if ($script:BZIP2 -eq $null) {
-        write-host "bzip2 not installed, not compressing files"
-        return
-    }
-    write-host "Compressing dlls..."
-    $libs = dir "${script:buildDir}/lib/*.dll"
-    foreach ($file in $libs) {
-        & "$script:BZIP2" -v9 $file
-    }
+    dumpbin /dependents "${script:buildDir}/bin/${script:config}/ext_server_shared.dll" | select-string ".dll"
 }
 
 function cleanup {
@@ -97,47 +71,33 @@ apply_patches
 $script:commonCpuDefs = @("-DCMAKE_POSITION_INDEPENDENT_CODE=on", "-DLLAMA_NATIVE=off")
 
 $script:cmakeDefs = $script:commonCpuDefs + @("-DLLAMA_AVX=off", "-DLLAMA_AVX2=off", "-DLLAMA_AVX512=off", "-DLLAMA_FMA=off", "-DLLAMA_F16C=off") + $script:cmakeDefs
-$script:buildDir="${script:llamacppDir}/build/windows/${script:ARCH}/cpu"
+$script:buildDir="${script:llamacppDir}/build/windows/cpu"
 write-host "Building LCD CPU"
 build
 install
-compress_libs
 
 $script:cmakeDefs = $script:commonCpuDefs + @("-DLLAMA_AVX=on", "-DLLAMA_AVX2=off", "-DLLAMA_AVX512=off", "-DLLAMA_FMA=off", "-DLLAMA_F16C=off") + $script:cmakeDefs
-$script:buildDir="${script:llamacppDir}/build/windows/${script:ARCH}/cpu_avx"
+$script:buildDir="${script:llamacppDir}/build/windows/cpu_avx"
 write-host "Building AVX CPU"
 build
 install
-compress_libs
 
 $script:cmakeDefs = $script:commonCpuDefs + @("-DLLAMA_AVX=on", "-DLLAMA_AVX2=on", "-DLLAMA_AVX512=off", "-DLLAMA_FMA=on", "-DLLAMA_F16C=on") + $script:cmakeDefs
-$script:buildDir="${script:llamacppDir}/build/windows/${script:ARCH}/cpu_avx2"
+$script:buildDir="${script:llamacppDir}/build/windows/cpu_avx2"
 write-host "Building AVX2 CPU"
 build
 install
-compress_libs
 
-if ($null -ne $script:CUDA_LIB_DIR) {
-    # Then build cuda as a dynamically loaded library
-    $nvcc = (get-command -ea 'silentlycontinue' nvcc)
-    if ($null -ne $nvcc) {
-        $script:CUDA_VERSION=(get-item ($nvcc | split-path | split-path)).Basename
-    }
-    if ($null -ne $script:CUDA_VERSION) {
-        $script:CUDA_VARIANT="_"+$script:CUDA_VERSION
-    }
-    init_vars
-    $script:buildDir="${script:llamacppDir}/build/windows/${script:ARCH}/cuda$script:CUDA_VARIANT"
-    $script:cmakeDefs += @("-DLLAMA_CUBLAS=ON", "-DLLAMA_AVX=on")
-    build
-    install
-    cp "${script:CUDA_LIB_DIR}/cudart64_*.dll" "${script:buildDir}/lib"
-    cp "${script:CUDA_LIB_DIR}/cublas64_*.dll" "${script:buildDir}/lib"
-    cp "${script:CUDA_LIB_DIR}/cublasLt64_*.dll" "${script:buildDir}/lib"
-    compress_libs
-}
+# Then build cuda as a dynamically loaded library
+# TODO figure out how to detect cuda version
+init_vars
+$script:buildDir="${script:llamacppDir}/build/windows/cuda"
+$script:cmakeDefs += @("-DLLAMA_CUBLAS=ON", "-DLLAMA_AVX=on")
+build
+install
+
 # TODO - actually implement ROCm support on windows
-$script:buildDir="${script:llamacppDir}/build/windows/${script:ARCH}/rocm"
+$script:buildDir="${script:llamacppDir}/build/windows/rocm"
 
 rm -ea 0 -recurse -force -path "${script:buildDir}/lib"
 md "${script:buildDir}/lib" -ea 0 > $null
