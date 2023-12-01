@@ -29,8 +29,8 @@ type handles struct {
 var gpuMutex sync.Mutex
 var gpuHandles *handles = nil
 
-// With our current CUDA compile flags, older than 5.0 will not work properly
-var CudaComputeMin = [2]C.int{5, 0}
+// With our current CUDA compile flags, 5.2 and older will not work properly
+const CudaComputeMajorMin = 6
 
 // Possible locations for the nvidia-ml library
 var CudaLinuxGlobs = []string{
@@ -133,7 +133,7 @@ func GetGPUInfo() GpuInfo {
 			if cc.err != nil {
 				slog.Info(fmt.Sprintf("error looking up CUDA GPU compute capability: %s", C.GoString(cc.err)))
 				C.free(unsafe.Pointer(cc.err))
-			} else if cc.major > CudaComputeMin[0] || (cc.major == CudaComputeMin[0] && cc.minor >= CudaComputeMin[1]) {
+			} else if cc.major >= CudaComputeMajorMin {
 				slog.Info(fmt.Sprintf("CUDA Compute Capability detected: %d.%d", cc.major, cc.minor))
 				resp.Library = "cuda"
 			} else {
@@ -191,11 +191,11 @@ func getCPUMem() (memInfo, error) {
 func CheckVRAM() (int64, error) {
 	gpuInfo := GetGPUInfo()
 	if gpuInfo.FreeMemory > 0 && (gpuInfo.Library == "cuda" || gpuInfo.Library == "rocm") {
-		// leave 10% or 512MiB of VRAM free per GPU to handle unaccounted for overhead
+		// leave 10% or 1024MiB of VRAM free per GPU to handle unaccounted for overhead
 		overhead := gpuInfo.FreeMemory / 10
 		gpus := uint64(gpuInfo.DeviceCount)
-		if overhead < gpus*512*1024*1024 {
-			overhead = gpus * 512 * 1024 * 1024
+		if overhead < gpus*1024*1024*1024 {
+			overhead = gpus * 1024 * 1024 * 1024
 		}
 		return int64(gpuInfo.FreeMemory - overhead), nil
 	}

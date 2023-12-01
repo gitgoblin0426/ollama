@@ -50,8 +50,7 @@ development and runtime packages.
 Typically the build scripts will auto-detect CUDA, however, if your Linux distro
 or installation approach uses unusual paths, you can specify the location by
 specifying an environment variable `CUDA_LIB_DIR` to the location of the shared
-libraries, and `CUDACXX` to the location of the nvcc compiler.  You can customize
-set set of target CUDA architectues by setting `CMAKE_CUDA_ARCHITECTURES` (e.g. "50;60;70")
+libraries, and `CUDACXX` to the location of the nvcc compiler.
 
 Then generate dependencies:
 
