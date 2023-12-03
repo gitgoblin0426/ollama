@@ -250,8 +250,7 @@ See the [API documentation](./docs/api.md) for all endpoints.
 
 ## Integrations
 
-- [ollama-python](https://github.com/ollama/ollama-python)
-- [ollama-js](https://github.com/ollama/ollama-js)
+- [ollama-python](https://github.com/jmorganca/ollama-python)
 
 ## Community Integrations
 

@@ -70,8 +70,7 @@ func New(workDir, model string, adapters, projectors []string, opts api.Options)
 			break
 		}
 
-		// TODO: implement layer splitting on macOS
-		opts.NumGPU = 999
+		opts.NumGPU = 1
 	default:
 		if info.Library == "cpu" {
 			slog.Info("GPU not available, falling back to CPU")
