@@ -30,8 +30,8 @@ type handles struct {
 var gpuMutex sync.Mutex
 var gpuHandles *handles = nil
 
-// With our current CUDA compile flags, 5.2 and older will not work properly
-const CudaComputeMajorMin = 6
+// With our current CUDA compile flags, older than 5.0 will not work properly
+var CudaComputeMin = [2]C.int{5, 0}
 
 // Possible locations for the nvidia-ml library
 var CudaLinuxGlobs = []string{
@@ -135,14 +135,14 @@ func GetGPUInfo() GpuInfo {
 		if memInfo.err != nil {
 			slog.Info(fmt.Sprintf("error looking up CUDA GPU memory: %s", C.GoString(memInfo.err)))
 			C.free(unsafe.Pointer(memInfo.err))
-		} else {
+		} else if memInfo.count > 0 {
 			// Verify minimum compute capability
 			var cc C.cuda_compute_capability_t
 			C.cuda_compute_capability(*gpuHandles.cuda, &cc)
 			if cc.err != nil {
 				slog.Info(fmt.Sprintf("error looking up CUDA GPU compute capability: %s", C.GoString(cc.err)))
 				C.free(unsafe.Pointer(cc.err))
-			} else if cc.major >= CudaComputeMajorMin {
+			} else if cc.major > CudaComputeMin[0] || (cc.major == CudaComputeMin[0] && cc.minor >= CudaComputeMin[1]) {
 				slog.Info(fmt.Sprintf("CUDA Compute Capability detected: %d.%d", cc.major, cc.minor))
 				resp.Library = "cuda"
 			} else {
@@ -157,7 +157,7 @@ func GetGPUInfo() GpuInfo {
 		} else if memInfo.igpu_index >= 0 && memInfo.count == 1 {
 			// Only one GPU detected and it appears to be an integrated GPU - skip it
 			slog.Info("ROCm unsupported integrated GPU detected")
-		} else {
+		} else if memInfo.count > 0 {
 			if memInfo.igpu_index >= 0 {
 				// We have multiple GPUs reported, and one of them is an integrated GPU
 				// so we have to set the env var to bypass it
