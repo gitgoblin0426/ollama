@@ -239,6 +239,11 @@ func GenerateHandler(c *gin.Context) {
 			Prompt: req.Prompt,
 			First:  len(req.Context) == 0,
 		}
+
+		if promptVars.System == "" {
+			promptVars.System = model.System
+		}
+
 		p, err := model.PreResponsePrompt(promptVars)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -247,6 +252,8 @@ func GenerateHandler(c *gin.Context) {
 		rebuild.WriteString(p)
 		prompt = rebuild.String()
 	}
+
+	slog.Debug(fmt.Sprintf("prompt: %s", prompt))
 
 	ch := make(chan any)
 	var generated strings.Builder
@@ -1119,6 +1126,8 @@ func ChatHandler(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
+	slog.Debug(fmt.Sprintf("prompt: %s", prompt))
 
 	ch := make(chan any)
 
