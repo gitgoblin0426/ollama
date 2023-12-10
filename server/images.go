@@ -146,59 +146,62 @@ func (m *Model) PostResponseTemplate(p PromptVars) (string, error) {
 	return Prompt(post, p)
 }
 
-type ChatHistory struct {
-	Prompts       []PromptVars
-	CurrentImages []api.ImageData
-	LastSystem    string
-}
-
-// ChatPrompts returns a list of formatted chat prompts from a list of messages
-func (m *Model) ChatPrompts(msgs []api.Message) (*ChatHistory, error) {
+func (m *Model) ChatPrompt(msgs []api.Message) (string, []api.ImageData, error) {
 	// build the prompt from the list of messages
+	var prompt strings.Builder
 	var currentImages []api.ImageData
-	var lastSystem string
 	currentVars := PromptVars{
 		First:  true,
 		System: m.System,
 	}
 
-	prompts := []PromptVars{}
+	writePrompt := func() error {
+		p, err := Prompt(m.Template, currentVars)
+		if err != nil {
+			return err
+		}
+		prompt.WriteString(p)
+		currentVars = PromptVars{}
+		return nil
+	}
 
 	for _, msg := range msgs {
 		switch strings.ToLower(msg.Role) {
 		case "system":
 			if currentVars.System != "" {
-				prompts = append(prompts, currentVars)
-				currentVars = PromptVars{}
+				if err := writePrompt(); err != nil {
+					return "", nil, err
+				}
 			}
 			currentVars.System = msg.Content
-			lastSystem = msg.Content
 		case "user":
 			if currentVars.Prompt != "" {
-				prompts = append(prompts, currentVars)
-				currentVars = PromptVars{}
+				if err := writePrompt(); err != nil {
+					return "", nil, err
+				}
 			}
 			currentVars.Prompt = msg.Content
 			currentImages = msg.Images
 		case "assistant":
 			currentVars.Response = msg.Content
-			prompts = append(prompts, currentVars)
-			currentVars = PromptVars{}
+			if err := writePrompt(); err != nil {
+				return "", nil, err
+			}
 		default:
-			return nil, fmt.Errorf("invalid role: %s, role must be one of [system, user, assistant]", msg.Role)
+			return "", nil, fmt.Errorf("invalid role: %s, role must be one of [system, user, assistant]", msg.Role)
 		}
 	}
 
 	// Append the last set of vars if they are non-empty
 	if currentVars.Prompt != "" || currentVars.System != "" {
-		prompts = append(prompts, currentVars)
+		p, err := m.PreResponsePrompt(currentVars)
+		if err != nil {
+			return "", nil, fmt.Errorf("pre-response template: %w", err)
+		}
+		prompt.WriteString(p)
 	}
 
-	return &ChatHistory{
-		Prompts:       prompts,
-		CurrentImages: currentImages,
-		LastSystem:    lastSystem,
-	}, nil
+	return prompt.String(), currentImages, nil
 }
 
 type ManifestV2 struct {
