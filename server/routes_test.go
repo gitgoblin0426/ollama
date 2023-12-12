@@ -455,8 +455,7 @@ func Test_ChatPrompt(t *testing.T) {
 					NumCtx: tt.numCtx,
 				},
 			}
-			// TODO: add tests for trimming images
-			got, _, err := trimmedPrompt(context.Background(), tt.chat, m)
+			got, err := trimmedPrompt(context.Background(), tt.chat, m)
 			if tt.wantErr != "" {
 				if err == nil {
 					t.Errorf("ChatPrompt() expected error, got nil")

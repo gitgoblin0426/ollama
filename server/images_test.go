@@ -238,36 +238,17 @@ func chatHistoryEqual(a, b ChatHistory) bool {
 	if len(a.Prompts) != len(b.Prompts) {
 		return false
 	}
+	if len(a.CurrentImages) != len(b.CurrentImages) {
+		return false
+	}
 	for i, v := range a.Prompts {
-
-		if v.First != b.Prompts[i].First {
+		if v != b.Prompts[i] {
 			return false
 		}
-
-		if v.Response != b.Prompts[i].Response {
+	}
+	for i, v := range a.CurrentImages {
+		if !bytes.Equal(v, b.CurrentImages[i]) {
 			return false
-		}
-
-		if v.Prompt != b.Prompts[i].Prompt {
-			return false
-		}
-
-		if v.System != b.Prompts[i].System {
-			return false
-		}
-
-		if len(v.Images) != len(b.Prompts[i].Images) {
-			return false
-		}
-
-		for j, img := range v.Images {
-			if img.ID != b.Prompts[i].Images[j].ID {
-				return false
-			}
-
-			if !bytes.Equal(img.Data, b.Prompts[i].Images[j].Data) {
-				return false
-			}
 		}
 	}
 	return a.LastSystem == b.LastSystem
