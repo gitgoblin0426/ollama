@@ -244,10 +244,6 @@ func GenerateHandler(c *gin.Context) {
 			promptVars.System = model.System
 		}
 
-		for i := range req.Images {
-			promptVars.Prompt += fmt.Sprintf(" [img-%d]", i)
-		}
-
 		p, err := model.PreResponsePrompt(promptVars)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -312,19 +308,11 @@ func GenerateHandler(c *gin.Context) {
 			ch <- resp
 		}
 
-		var images []llm.ImageData
-		for i := range req.Images {
-			images = append(images, llm.ImageData{
-				ID:   i,
-				Data: req.Images[i],
-			})
-		}
-
 		// Start prediction
 		predictReq := llm.PredictOpts{
 			Prompt:  prompt,
 			Format:  req.Format,
-			Images:  images,
+			Images:  req.Images,
 			Options: opts,
 		}
 		if err := loaded.runner.Predict(c.Request.Context(), predictReq, fn); err != nil {
@@ -1151,8 +1139,7 @@ func ChatHandler(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
-	prompt, images, err := trimmedPrompt(c.Request.Context(), chat, model)
+	prompt, err := trimmedPrompt(c.Request.Context(), chat, model)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -1195,7 +1182,7 @@ func ChatHandler(c *gin.Context) {
 		predictReq := llm.PredictOpts{
 			Prompt:  prompt,
 			Format:  req.Format,
-			Images:  images,
+			Images:  chat.CurrentImages,
 			Options: opts,
 		}
 		if err := loaded.runner.Predict(c.Request.Context(), predictReq, fn); err != nil {
@@ -1242,26 +1229,25 @@ type promptInfo struct {
 
 // trimmedPrompt builds a prompt to send to a running model. It ensures the prompt fits within the max context length,
 // while preserving the most recent system message.
-func trimmedPrompt(ctx context.Context, chat *ChatHistory, model *Model) (string, []llm.ImageData, error) {
+func trimmedPrompt(ctx context.Context, chat *ChatHistory, model *Model) (string, error) {
 	if len(chat.Prompts) == 0 {
-		return "", nil, nil
+		return "", nil
 	}
 
 	var promptsToAdd []promptInfo
 	var totalTokenLength int
 	var systemPromptIncluded bool
 
-	var images []llm.ImageData
 	// reverse iterate through the prompts to build the prompt string in a way that fits the max context length
 	for i := len(chat.Prompts) - 1; i >= 0; i-- {
 		promptText, err := promptString(model, chat.Prompts[i], i == len(chat.Prompts)-1)
 		if err != nil {
-			return "", nil, err
+			return "", err
 		}
 
 		encodedTokens, err := loaded.runner.Encode(ctx, promptText)
 		if err != nil {
-			return "", nil, err
+			return "", err
 		}
 
 		if totalTokenLength+len(encodedTokens) > loaded.NumCtx && i != len(chat.Prompts)-1 {
@@ -1271,12 +1257,6 @@ func trimmedPrompt(ctx context.Context, chat *ChatHistory, model *Model) (string
 		totalTokenLength += len(encodedTokens)
 		systemPromptIncluded = systemPromptIncluded || chat.Prompts[i].System != ""
 		promptsToAdd = append(promptsToAdd, promptInfo{vars: chat.Prompts[i], tokenLen: len(encodedTokens)})
-
-		images = append(images, chat.Prompts[i].Images...)
-
-		// clip has a projection dimension of 768
-		// TODO: use kv['clip.vision.projection_dim'] from projection instead
-		totalTokenLength += 768 * len(chat.Prompts[i].Images)
 	}
 
 	// ensure the system prompt is included, if not already
@@ -1284,7 +1264,7 @@ func trimmedPrompt(ctx context.Context, chat *ChatHistory, model *Model) (string
 		var err error
 		promptsToAdd, err = includeSystemPrompt(ctx, chat.LastSystem, totalTokenLength, promptsToAdd)
 		if err != nil {
-			return "", nil, err
+			return "", err
 		}
 	}
 
@@ -1295,12 +1275,11 @@ func trimmedPrompt(ctx context.Context, chat *ChatHistory, model *Model) (string
 	for i, prompt := range promptsToAdd {
 		promptText, err := promptString(model, prompt.vars, i == 0)
 		if err != nil {
-			return "", nil, err
+			return "", err
 		}
 		result = promptText + result
 	}
-
-	return result, images, nil
+	return result, nil
 }
 
 // promptString applies the model template to the prompt

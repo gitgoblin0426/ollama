@@ -63,7 +63,6 @@ type PromptVars struct {
 	Prompt   string
 	Response string
 	First    bool
-	Images   []llm.ImageData
 }
 
 // extractParts extracts the parts of the template before and after the {{.Response}} node.
@@ -148,13 +147,15 @@ func (m *Model) PostResponseTemplate(p PromptVars) (string, error) {
 }
 
 type ChatHistory struct {
-	Prompts    []PromptVars
-	LastSystem string
+	Prompts       []PromptVars
+	CurrentImages []api.ImageData
+	LastSystem    string
 }
 
 // ChatPrompts returns a list of formatted chat prompts from a list of messages
 func (m *Model) ChatPrompts(msgs []api.Message) (*ChatHistory, error) {
 	// build the prompt from the list of messages
+	var currentImages []api.ImageData
 	lastSystem := m.System
 	currentVars := PromptVars{
 		First:  true,
@@ -162,7 +163,6 @@ func (m *Model) ChatPrompts(msgs []api.Message) (*ChatHistory, error) {
 	}
 
 	prompts := []PromptVars{}
-	var images []llm.ImageData
 
 	for _, msg := range msgs {
 		switch strings.ToLower(msg.Role) {
@@ -179,18 +179,8 @@ func (m *Model) ChatPrompts(msgs []api.Message) (*ChatHistory, error) {
 				prompts = append(prompts, currentVars)
 				currentVars = PromptVars{}
 			}
-
 			currentVars.Prompt = msg.Content
-			for i := range msg.Images {
-				currentVars.Prompt += fmt.Sprintf(" [img-%d]", len(images)+i)
-				currentVars.Images = append(currentVars.Images, llm.ImageData{
-					ID:   i,
-					Data: msg.Images[i],
-				})
-
-			}
-
-			images = append(images, currentVars.Images...)
+			currentImages = msg.Images
 		case "assistant":
 			currentVars.Response = msg.Content
 			prompts = append(prompts, currentVars)
@@ -206,8 +196,9 @@ func (m *Model) ChatPrompts(msgs []api.Message) (*ChatHistory, error) {
 	}
 
 	return &ChatHistory{
-		Prompts:    prompts,
-		LastSystem: lastSystem,
+		Prompts:       prompts,
+		CurrentImages: currentImages,
+		LastSystem:    lastSystem,
 	}, nil
 }
 
