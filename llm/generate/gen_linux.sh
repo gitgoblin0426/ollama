@@ -21,6 +21,7 @@ amdGPUs() {
         return
     fi
     GPU_LIST=(
+        "gfx803"
         "gfx900"
         "gfx906:xnack-"
         "gfx908:xnack-"
