@@ -10,4 +10,3 @@ ggml-metal.metal
 *.exe
 .idea
 test_data
-*.crt
