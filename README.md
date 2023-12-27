@@ -12,11 +12,11 @@ Get up and running with large language models locally.
 
 [Download](https://ollama.com/download/Ollama-darwin.zip)
 
-### Windows preview
+### Windows
 
-[Download](https://ollama.com/download/OllamaSetup.exe)
+Coming soon! For now, you can install Ollama on Windows via WSL2.
 
-### Linux
+### Linux & WSL2
 
 ```
 curl -fsSL https://ollama.com/install.sh | sh
