@@ -24,13 +24,13 @@ fi
 chmod +x dist/ollama
 
 # build and optionally sign the mac app
-npm install --prefix macapp
+npm install --prefix app
 if [ -n "$APPLE_IDENTITY" ]; then
-    npm run --prefix macapp make:sign
+    npm run --prefix app make:sign
 else 
-    npm run --prefix macapp make
+    npm run --prefix app make
 fi
-cp macapp/out/make/zip/darwin/universal/Ollama-darwin-universal-$VERSION.zip dist/Ollama-darwin.zip
+cp app/out/make/zip/darwin/universal/Ollama-darwin-universal-$VERSION.zip dist/Ollama-darwin.zip
 
 # sign the binary and rename it
 if [ -n "$APPLE_IDENTITY" ]; then
