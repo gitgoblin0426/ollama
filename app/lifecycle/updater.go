@@ -23,9 +23,8 @@ import (
 )
 
 var (
-	UpdateCheckURLBase  = "https://ollama.com/api/update"
-	UpdateDownloaded    = false
-	UpdateCheckInterval = 60 * 60 * time.Second
+	UpdateCheckURLBase = "https://ollama.com/api/update"
+	UpdateDownloaded   = false
 )
 
 // TODO - maybe move up to the API package?
@@ -113,6 +112,7 @@ func IsNewReleaseAvailable(ctx context.Context) (bool, UpdateResponse) {
 	return true, updateResp
 }
 
+// Returns true if we downloaded a new update, false if we already had it
 func DownloadNewRelease(ctx context.Context, updateResp UpdateResponse) error {
 	// Do a head first to check etag info
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, updateResp.UpdateURL, nil)
@@ -144,7 +144,7 @@ func DownloadNewRelease(ctx context.Context, updateResp UpdateResponse) error {
 	// Check to see if we already have it downloaded
 	_, err = os.Stat(stageFilename)
 	if err == nil {
-		slog.Info("update already downloaded")
+		slog.Debug("update already downloaded")
 		return nil
 	}
 
@@ -231,7 +231,7 @@ func StartBackgroundUpdaterChecker(ctx context.Context, cb func(string) error) {
 				slog.Debug("stopping background update checker")
 				return
 			default:
-				time.Sleep(UpdateCheckInterval)
+				time.Sleep(60 * 60 * time.Second)
 			}
 		}
 	}()

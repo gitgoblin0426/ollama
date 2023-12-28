@@ -6,8 +6,6 @@ import (
 	"log"
 	"log/slog"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/jmorganca/ollama/app/store"
 	"github.com/jmorganca/ollama/app/tray"
@@ -25,18 +23,12 @@ func Run() {
 	}
 	callbacks := t.GetCallbacks()
 
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
-
 	go func() {
 		slog.Debug("starting callback loop")
 		for {
 			select {
 			case <-callbacks.Quit:
-				slog.Debug("quit called")
-				t.Quit()
-			case <-signals:
-				slog.Debug("shutting down due to signal")
+				slog.Debug("QUIT called")
 				t.Quit()
 			case <-callbacks.Update:
 				err := DoUpgrade(cancel, done)
