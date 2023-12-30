@@ -2,7 +2,6 @@ package gpu
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -25,23 +24,14 @@ const (
 )
 
 func AMDDetected() bool {
-	// Some driver versions (older?) don't have a version file, so just lookup the parent dir
-	sysfsDir := filepath.Dir(DriverVersionFile)
-	_, err := os.Stat(sysfsDir)
-	if errors.Is(err, os.ErrNotExist) {
-		slog.Debug("amd driver not detected " + sysfsDir)
-		return false
-	} else if err != nil {
-		slog.Debug(fmt.Sprintf("error looking up amd driver %s %s", sysfsDir, err))
-		return false
-	}
-	return true
+	_, err := AMDDriverVersion()
+	return err == nil
 }
 
 func AMDDriverVersion() (string, error) {
 	_, err := os.Stat(DriverVersionFile)
 	if err != nil {
-		return "", fmt.Errorf("amdgpu file stat error: %s %w", DriverVersionFile, err)
+		return "", err
 	}
 	fp, err := os.Open(DriverVersionFile)
 	if err != nil {
