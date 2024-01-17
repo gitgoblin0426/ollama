@@ -22,6 +22,5 @@ for TARGETARCH in ${BUILD_ARCH}; do
         .
     docker create --platform linux/$TARGETARCH --name builder-$TARGETARCH builder:$TARGETARCH
     docker cp builder-$TARGETARCH:/go/src/github.com/jmorganca/ollama/ollama ./dist/ollama-linux-$TARGETARCH
-    docker cp builder-$TARGETARCH:/go/src/github.com/jmorganca/ollama/dist/deps/ ./dist/
     docker rm builder-$TARGETARCH
 done

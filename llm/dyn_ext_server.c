@@ -14,14 +14,17 @@
 #define LOAD_LIBRARY(lib, flags) LoadLibrary(lib)
 #define LOAD_SYMBOL(handle, sym) GetProcAddress(handle, sym)
 #define UNLOAD_LIBRARY(handle) FreeLibrary(handle)
-#define LOAD_ERR() ({\
-  LPSTR messageBuffer = NULL; \
-  size_t size = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, \
-                                 NULL, GetLastError(), MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPSTR)&messageBuffer, 0, NULL); \
-  char *resp = strdup(messageBuffer); \
-  LocalFree(messageBuffer); \
-  resp; \
-})
+inline char *LOAD_ERR() {
+  LPSTR messageBuffer = NULL;
+  size_t size = FormatMessageA(
+      FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+          FORMAT_MESSAGE_IGNORE_INSERTS,
+      NULL, GetLastError(), MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+      (LPSTR)&messageBuffer, 0, NULL);
+  char *resp = strdup(messageBuffer);
+  LocalFree(messageBuffer);
+  return resp;
+}
 #else
 #include <dlfcn.h>
 #define LOAD_LIBRARY(lib, flags) dlopen(lib, flags)
