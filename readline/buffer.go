@@ -19,9 +19,10 @@ type Buffer struct {
 
 func NewBuffer(prompt *Prompt) (*Buffer, error) {
 	fd := int(os.Stdout.Fd())
-	width, height := 80, 24
-	if termWidth, termHeight, err := term.GetSize(fd); err == nil {
-		width, height = termWidth, termHeight
+	width, height, err := term.GetSize(fd)
+	if err != nil {
+		fmt.Println("Error getting size:", err)
+		return nil, err
 	}
 
 	lwidth := width - len(prompt.prompt())
