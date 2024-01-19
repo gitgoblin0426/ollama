@@ -109,3 +109,7 @@ which version to install.
 ```sh
 curl -fsSL https://ollama.com/install.sh | OLLAMA_VERSION="0.1.27" sh
 ```
+
+## Known issues
+
+* N/A
