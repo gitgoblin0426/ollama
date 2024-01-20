@@ -282,24 +282,9 @@ func AMDValidateLibDir() (string, error) {
 	}
 
 	// If we already have a rocm dependency wired, nothing more to do
-	rocmTargetDir := filepath.Clean(filepath.Join(payloadsDir, "..", "rocm"))
+	rocmTargetDir := filepath.Join(payloadsDir, "rocm")
 	if rocmLibUsable(rocmTargetDir) {
 		return rocmTargetDir, nil
-	}
-
-	// next to the running binary
-	exe, err := os.Executable()
-	if err == nil {
-		peerDir := filepath.Dir(exe)
-		if rocmLibUsable(peerDir) {
-			slog.Debug("detected ROCM next to ollama executable " + peerDir)
-			return rocmTargetDir, setupLink(peerDir, rocmTargetDir)
-		}
-		peerDir = filepath.Join(filepath.Dir(exe), "rocm")
-		if rocmLibUsable(peerDir) {
-			slog.Debug("detected ROCM next to ollama executable " + peerDir)
-			return rocmTargetDir, setupLink(peerDir, rocmTargetDir)
-		}
 	}
 
 	// Well known ollama installer path
