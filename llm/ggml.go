@@ -103,7 +103,7 @@ type model interface {
 
 type container interface {
 	Name() string
-	Decode(io.ReadSeeker) (model, error)
+	Decode(*readSeekOffset) (model, error)
 }
 
 const (
@@ -122,9 +122,11 @@ const (
 
 var ErrUnsupportedFormat = errors.New("unsupported model format")
 
-func DecodeGGML(rs io.ReadSeeker) (*GGML, error) {
+func DecodeGGML(r io.ReadSeeker) (*GGML, error) {
+	ro := readSeekOffset{ReadSeeker: r}
+
 	var magic uint32
-	if err := binary.Read(rs, binary.LittleEndian, &magic); err != nil {
+	if err := binary.Read(&ro, binary.LittleEndian, &magic); err != nil {
 		return nil, err
 	}
 
@@ -142,15 +144,10 @@ func DecodeGGML(rs io.ReadSeeker) (*GGML, error) {
 		return nil, errors.New("invalid file magic")
 	}
 
-	model, err := c.Decode(rs)
+	model, err := c.Decode(&ro)
 	if errors.Is(err, io.EOF) {
 		// noop
 	} else if err != nil {
-		return nil, err
-	}
-
-	offset, err := rs.Seek(0, io.SeekCurrent)
-	if err != nil {
 		return nil, err
 	}
 
@@ -158,6 +155,27 @@ func DecodeGGML(rs io.ReadSeeker) (*GGML, error) {
 	return &GGML{
 		container: c,
 		model:     model,
-		Size:      offset,
+		Size:      ro.offset,
 	}, nil
+}
+
+type readSeekOffset struct {
+	io.ReadSeeker
+	offset int64
+}
+
+func (rso *readSeekOffset) Seek(offset int64, whence int) (int64, error) {
+	offset, err := rso.ReadSeeker.Seek(offset, whence)
+	if err != nil {
+		return 0, err
+	}
+
+	rso.offset = offset
+	return offset, nil
+}
+
+func (rso *readSeekOffset) Read(p []byte) (int, error) {
+	n, err := rso.ReadSeeker.Read(p)
+	rso.offset += int64(n)
+	return n, err
 }

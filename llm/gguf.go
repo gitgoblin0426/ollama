@@ -42,18 +42,18 @@ func (c *ContainerGGUF) Name() string {
 	return "gguf"
 }
 
-func (c *ContainerGGUF) Decode(rs io.ReadSeeker) (model, error) {
-	binary.Read(rs, c.ByteOrder, &c.Version)
+func (c *ContainerGGUF) Decode(rso *readSeekOffset) (model, error) {
+	binary.Read(rso, c.ByteOrder, &c.Version)
 
 	switch c.Version {
 	case 1:
-		binary.Read(rs, c.ByteOrder, &c.V1)
+		binary.Read(rso, c.ByteOrder, &c.V1)
 	default:
-		binary.Read(rs, c.ByteOrder, &c.V2)
+		binary.Read(rso, c.ByteOrder, &c.V2)
 	}
 
 	model := NewGGUFModel(c)
-	if err := model.Decode(rs); err != nil {
+	if err := model.Decode(rso); err != nil {
 		return nil, err
 	}
 
@@ -633,49 +633,49 @@ func (llm *GGUFModel) writeString(f *os.File, s string) error {
 	return nil
 }
 
-func (llm *GGUFModel) Decode(rs io.ReadSeeker) error {
+func (llm *GGUFModel) Decode(rso *readSeekOffset) error {
 	// decode key-values
 	for i := 0; uint64(i) < llm.NumKV(); i++ {
-		k, err := llm.readString(rs)
+		k, err := llm.readString(rso)
 		if err != nil {
 			return err
 		}
 
-		vtype := llm.readU32(rs)
+		vtype := llm.readU32(rso)
 
 		var v any
 		switch vtype {
 		case GGUFTypeUint8:
-			v = llm.readU8(rs)
+			v = llm.readU8(rso)
 		case GGUFTypeInt8:
-			v = llm.readI8(rs)
+			v = llm.readI8(rso)
 		case GGUFTypeUint16:
-			v = llm.readU16(rs)
+			v = llm.readU16(rso)
 		case GGUFTypeInt16:
-			v = llm.readI16(rs)
+			v = llm.readI16(rso)
 		case GGUFTypeUint32:
-			v = llm.readU32(rs)
+			v = llm.readU32(rso)
 		case GGUFTypeInt32:
-			v = llm.readI32(rs)
+			v = llm.readI32(rso)
 		case GGUFTypeUint64:
-			v = llm.readU64(rs)
+			v = llm.readU64(rso)
 		case GGUFTypeInt64:
-			v = llm.readI64(rs)
+			v = llm.readI64(rso)
 		case GGUFTypeFloat32:
-			v = llm.readF32(rs)
+			v = llm.readF32(rso)
 		case GGUFTypeFloat64:
-			v = llm.readF64(rs)
+			v = llm.readF64(rso)
 		case GGUFTypeBool:
-			v = llm.readBool(rs)
+			v = llm.readBool(rso)
 		case GGUFTypeString:
-			s, err := llm.readString(rs)
+			s, err := llm.readString(rso)
 			if err != nil {
 				return err
 			}
 
 			v = s
 		case GGUFTypeArray:
-			a, err := llm.readArray(rs)
+			a, err := llm.readArray(rso)
 			if err != nil {
 				return err
 			}
@@ -690,23 +690,23 @@ func (llm *GGUFModel) Decode(rs io.ReadSeeker) error {
 
 	// decode tensors
 	for i := 0; uint64(i) < llm.NumTensor(); i++ {
-		name, err := llm.readString(rs)
+		name, err := llm.readString(rso)
 		if err != nil {
 			return err
 		}
 
 		// dims is the number of dimensions in the tensor
-		dims := llm.readU32(rs)
+		dims := llm.readU32(rso)
 
 		shape := [4]uint64{1, 1, 1, 1}
 		for i := 0; uint32(i) < dims; i++ {
-			shape[i] = llm.readU64(rs)
+			shape[i] = llm.readU64(rso)
 		}
 
 		tensor := Tensor{
 			Name:   name,
-			Kind:   llm.readU32(rs),
-			Offset: llm.readU64(rs),
+			Kind:   llm.readU32(rso),
+			Offset: llm.readU64(rso),
 			Shape:  shape[:],
 		}
 
@@ -719,20 +719,10 @@ func (llm *GGUFModel) Decode(rs io.ReadSeeker) error {
 		alignment = 32
 	}
 
-	offset, err := rs.Seek(0, io.SeekCurrent)
-	if err != nil {
-		return err
-	}
-
-	if _, err := rs.Seek(int64(alignment)-offset%int64(alignment), io.SeekCurrent); err != nil {
-		return err
-	}
-
+	rso.Seek(int64(alignment)-rso.offset%int64(alignment), io.SeekCurrent)
 	for _, tensor := range llm.Tensors {
 		padded := (int64(tensor.Size()) + int64(alignment) - 1) & ^(int64(alignment) - 1)
-		if _, err := rs.Seek(padded, io.SeekCurrent); err != nil {
-			return err
-		}
+		rso.Seek(padded, io.SeekCurrent)
 	}
 
 	return nil
