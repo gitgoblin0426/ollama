@@ -1,38 +1,49 @@
 //go:build integration
 
-package integration
+package server
 
 import (
 	"context"
 	"encoding/base64"
-	"net/http"
+	"log"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jmorganca/ollama/api"
+	"github.com/jmorganca/ollama/llm"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestIntegrationMultimodal(t *testing.T) {
+	SkipIFNoTestData(t)
 	image, err := base64.StdEncoding.DecodeString(imageEncoding)
 	require.NoError(t, err)
 	req := api.GenerateRequest{
-		Model:  "llava:7b",
-		Prompt: "what does the text in this image say?",
-		Stream: &stream,
-		Options: map[string]interface{}{
-			"seed":        42,
-			"temperature": 0.0,
-		},
+		Model:   "llava:7b",
+		Prompt:  "what does the text in this image say?",
+		Options: map[string]interface{}{},
 		Images: []api.ImageData{
 			image,
 		},
 	}
-
 	resp := "the ollamas"
+	workDir, err := os.MkdirTemp("", "ollama")
+	require.NoError(t, err)
+	defer os.RemoveAll(workDir)
+	require.NoError(t, llm.Init(workDir))
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*60)
 	defer cancel()
-	GenerateTestHelper(ctx, t, &http.Client{}, req, []string{resp})
+	opts := api.DefaultOptions()
+	opts.Seed = 42
+	opts.Temperature = 0.0
+	model, llmRunner := PrepareModelForPrompts(t, req.Model, opts)
+	defer llmRunner.Close()
+	response := OneShotPromptResponse(t, ctx, req, model, llmRunner)
+	log.Print(response)
+	assert.Contains(t, strings.ToLower(response), resp)
 }
 
 const imageEncoding = `iVBORw0KGgoAAAANSUhEUgAAANIAAAB4CAYAAACHHqzKAAAAAXNSR0IArs4c6QAAAIRlWElmTU0AKgAAAAgABQESAAMAAAABAAEAAAEaAAUAAAABAAAASgEb
