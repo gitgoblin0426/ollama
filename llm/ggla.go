@@ -35,7 +35,7 @@ type ggla struct {
 	*containerGGLA
 
 	kv      KV
-	tensors []*Tensor
+	tensors []Tensor
 }
 
 func newGGLA(container *containerGGLA) *ggla {
@@ -45,26 +45,18 @@ func newGGLA(container *containerGGLA) *ggla {
 	}
 }
 
-func (llm *ggla) KV() KV {
-	return llm.kv
-}
-
-func (llm *ggla) Tensors() []*Tensor {
-	return llm.tensors
-}
-
-func (llm *ggla) decode(rs io.ReadSeeker) error {
+func (m *ggla) decode(rs io.ReadSeeker) error {
 	var r uint32
 	if err := binary.Read(rs, binary.LittleEndian, &r); err != nil {
 		return err
 	}
-	llm.kv["r"] = r
+	m.kv["r"] = r
 
 	var alpha uint32
 	if err := binary.Read(rs, binary.LittleEndian, &alpha); err != nil {
 		return err
 	}
-	llm.kv["alpha"] = alpha
+	m.kv["alpha"] = alpha
 
 	for {
 		var dims uint32
@@ -123,6 +115,50 @@ func (llm *ggla) decode(rs io.ReadSeeker) error {
 			return err
 		}
 
-		llm.tensors = append(llm.tensors, &t)
+		m.tensors = append(m.tensors, t)
 	}
+}
+
+func (m *ggla) KV() KV {
+	return m.kv
+}
+
+func (m *ggla) Tensor() []Tensor {
+	return m.tensors
+}
+
+func (*ggla) ModelFamily() string {
+	return "ggla"
+}
+
+func (*ggla) ModelType() string {
+	panic("not implemented")
+}
+
+func (*ggla) FileType() string {
+	panic("not implemented")
+}
+
+func (*ggla) NumLayers() uint32 {
+	panic("not implemented")
+}
+
+func (*ggla) NumGQA() uint32 {
+	panic("not implemented")
+}
+
+func (*ggla) NumEmbed() uint32 {
+	panic("not implemented")
+}
+
+func (*ggla) NumHead() uint32 {
+	panic("not implemented")
+}
+
+func (*ggla) NumHeadKv() uint32 {
+	panic("not implemented")
+}
+
+func (*ggla) NumCtx() uint32 {
+	panic("not implemented")
 }

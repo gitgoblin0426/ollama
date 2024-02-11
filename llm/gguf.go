@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/ollama/ollama/format"
 )
 
 type containerGGUF struct {
@@ -88,8 +90,8 @@ const (
 type gguf struct {
 	*containerGGUF
 
-	kv      KV
-	tensors []*Tensor
+	KV
+	Tensors []Tensor
 
 	parameters uint64
 }
@@ -97,20 +99,12 @@ type gguf struct {
 func newGGUF(container *containerGGUF) *gguf {
 	return &gguf{
 		containerGGUF: container,
-		kv:            make(KV),
+		KV:            make(KV),
 	}
 }
 
 func NewGGUFV3(bo binary.ByteOrder) *gguf {
 	return newGGUF(&containerGGUF{ByteOrder: bo, Version: 3})
-}
-
-func (llm *gguf) KV() KV {
-	return llm.kv
-}
-
-func (llm *gguf) Tensors() []*Tensor {
-	return llm.tensors
 }
 
 func (llm *gguf) numTensor() uint64 {
@@ -133,6 +127,30 @@ func (llm *gguf) numKV() uint64 {
 	default:
 		return llm.V3.NumKV
 	}
+}
+
+func (llm *gguf) ModelFamily() string {
+	if t, ok := llm.KV["general.architecture"].(string); ok {
+		return t
+	}
+
+	return "unknown"
+}
+
+func (llm *gguf) ModelType() string {
+	if llm.parameters > 0 {
+		return format.HumanNumber(llm.parameters)
+	}
+
+	return "unknown"
+}
+
+func (llm *gguf) FileType() string {
+	if t, ok := llm.KV["general.file_type"].(uint32); ok {
+		return fileType(t)
+	}
+
+	return "unknown"
 }
 
 func (llm *gguf) Decode(rs io.ReadSeeker) error {
@@ -184,7 +202,7 @@ func (llm *gguf) Decode(rs io.ReadSeeker) error {
 			return err
 		}
 
-		llm.kv[k] = v
+		llm.KV[k] = v
 	}
 
 	// decode tensors
@@ -225,14 +243,11 @@ func (llm *gguf) Decode(rs io.ReadSeeker) error {
 			Shape:  shape[:],
 		}
 
-		llm.tensors = append(llm.tensors, &tensor)
+		llm.Tensors = append(llm.Tensors, tensor)
 		llm.parameters += tensor.parameters()
 	}
 
-	// patch KV with parameter count
-	llm.kv["general.parameter_count"] = llm.parameters
-
-	alignment, ok := llm.kv["general.alignment"].(uint32)
+	alignment, ok := llm.KV["general.alignment"].(uint32)
 	if !ok {
 		alignment = 32
 	}
@@ -247,7 +262,7 @@ func (llm *gguf) Decode(rs io.ReadSeeker) error {
 		return err
 	}
 
-	for _, tensor := range llm.tensors {
+	for _, tensor := range llm.Tensors {
 		padded := (int64(tensor.size()) + int64(alignment) - 1) & ^(int64(alignment) - 1)
 		if _, err := rs.Seek(padded, io.SeekCurrent); err != nil {
 			return err
@@ -255,6 +270,60 @@ func (llm *gguf) Decode(rs io.ReadSeeker) error {
 	}
 
 	return nil
+}
+
+func (llm *gguf) NumLayers() uint32 {
+	value, exists := llm.KV[fmt.Sprintf("%s.block_count", llm.ModelFamily())]
+	if !exists {
+		return 0
+	}
+
+	return value.(uint32)
+}
+
+func (llm *gguf) NumHead() uint32 {
+	value, exists := llm.KV[fmt.Sprintf("%s.attention.head_count", llm.ModelFamily())]
+	if !exists {
+		return 0
+	}
+
+	return value.(uint32)
+}
+
+func (llm *gguf) NumEmbed() uint32 {
+	value, exists := llm.KV[fmt.Sprintf("%s.embedding_length", llm.ModelFamily())]
+	if !exists {
+		return 0
+	}
+
+	return value.(uint32)
+}
+
+func (llm *gguf) NumHeadKv() uint32 {
+	value, exists := llm.KV[fmt.Sprintf("%s.attention.head_count_kv", llm.ModelFamily())]
+	if !exists {
+		return 0
+	}
+
+	return value.(uint32)
+}
+
+func (llm *gguf) NumCtx() uint32 {
+	value, exists := llm.KV[fmt.Sprintf("%s.context_length", llm.ModelFamily())]
+	if !exists {
+		return 0
+	}
+
+	return value.(uint32)
+}
+
+func (llm *gguf) NumGQA() uint32 {
+	numHeadKv := llm.NumHeadKv()
+	if numHeadKv == 0 {
+		return 0
+	}
+
+	return llm.NumHead() / numHeadKv
 }
 
 func readGGUF[T any](llm *gguf, r io.Reader) (T, error) {

@@ -26,7 +26,6 @@ import (
 
 	"github.com/ollama/ollama/api"
 	"github.com/ollama/ollama/convert"
-	"github.com/ollama/ollama/format"
 	"github.com/ollama/ollama/llm"
 	"github.com/ollama/ollama/parser"
 	"github.com/ollama/ollama/version"
@@ -421,32 +420,37 @@ func CreateModel(ctx context.Context, name, modelFileDir string, commands []pars
 			defer bin.Close()
 
 			var offset int64
+		CREATE:
 			for {
 				fn(api.ProgressResponse{Status: "creating model layer"})
 				if _, err := bin.Seek(offset, io.SeekStart); err != nil {
 					return err
 				}
 
-				ggml, size, err := llm.DecodeGGML(bin)
-				if errors.Is(err, io.EOF) {
-					break
-				} else if errors.Is(err, llm.ErrUnsupportedFormat) {
-					return fmt.Errorf("model binary specified in FROM field is not a valid gguf format model, %w", err)
-				} else if err != nil {
-					return err
+				ggml, err := llm.DecodeGGML(bin)
+				if err != nil {
+					slog.Error(fmt.Sprintf("error decoding gguf file: %q", err))
+					switch {
+					case errors.Is(err, io.EOF):
+						break CREATE
+					case errors.Is(err, llm.ErrUnsupportedFormat):
+						return fmt.Errorf("model binary specified in FROM field is not a valid gguf format model, %w", err)
+					default:
+						return err
+					}
 				}
 
 				config.SetModelFormat(ggml.Name())
-				config.SetModelFamily(ggml.KV().Architecture())
-				config.SetModelType(format.HumanNumber(ggml.KV().ParameterCount()))
-				config.SetFileType(ggml.KV().FileType())
+				config.SetModelFamily(ggml.ModelFamily())
+				config.SetModelType(ggml.ModelType())
+				config.SetFileType(ggml.FileType())
 
 				mediatype := mediatype
-				if ggml.KV().Architecture() == "clip" {
+				if ggml.ModelFamily() == "clip" {
 					mediatype = "application/vnd.ollama.image.projector"
 				}
 
-				sr := io.NewSectionReader(bin, offset, size)
+				sr := io.NewSectionReader(bin, offset, ggml.Size)
 				layer, err := NewLayer(sr, mediatype)
 				if err != nil {
 					return err
@@ -454,7 +458,7 @@ func CreateModel(ctx context.Context, name, modelFileDir string, commands []pars
 
 				layers.Add(layer)
 
-				offset += size
+				offset += ggml.Size
 			}
 		case "adapter":
 			if strings.HasPrefix(c.Args, "@") {
@@ -473,12 +477,12 @@ func CreateModel(ctx context.Context, name, modelFileDir string, commands []pars
 			}
 			defer bin.Close()
 
-			_, size, err := llm.DecodeGGML(bin)
+			ggml, err := llm.DecodeGGML(bin)
 			if err != nil {
 				return err
 			}
 
-			sr := io.NewSectionReader(bin, 0, size)
+			sr := io.NewSectionReader(bin, 0, ggml.Size)
 			layer, err := NewLayer(sr, mediatype)
 			if err != nil {
 				return err
@@ -547,6 +551,13 @@ func CreateModel(ctx context.Context, name, modelFileDir string, commands []pars
 		for k, v := range fromParams {
 			if _, ok := formattedParams[k]; !ok {
 				formattedParams[k] = v
+			}
+		}
+
+		// xxx - can this be removed?
+		if config.ModelType == "65B" {
+			if gqa, ok := formattedParams["gqa"].(int); ok && gqa == 8 {
+				config.ModelType = "70B"
 			}
 		}
 

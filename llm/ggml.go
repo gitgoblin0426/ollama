@@ -3,24 +3,14 @@ package llm
 import (
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
-	"strings"
 )
 
 type GGML struct {
 	container
 	model
-}
 
-func (ggml *GGML) LayerSize(prefix string) (n int64) {
-	for _, t := range ggml.Tensors() {
-		if strings.HasPrefix(t.Name, prefix) {
-			n += int64(t.size())
-		}
-	}
-
-	return
+	Size int64
 }
 
 const (
@@ -100,82 +90,28 @@ func fileType(fileType uint32) string {
 }
 
 type model interface {
-	KV() KV
-	Tensors() []*Tensor
+	ModelFamily() string
+	ModelType() string
+	FileType() string
+	NumLayers() uint32
+	NumGQA() uint32
+	NumEmbed() uint32
+	NumHead() uint32
+	NumHeadKv() uint32
+	NumCtx() uint32
 }
 
 type KV map[string]any
 
-func (kv KV) u64(key string) uint64 {
-	switch v := kv[key].(type) {
-	case uint64:
-		return v
-	case uint32:
-		return uint64(v)
-	case float64:
-		return uint64(v)
-	default:
-		return 0
-	}
-}
-
-func (kv KV) Architecture() string {
-	if s, ok := kv["general.architecture"].(string); ok {
-		return s
-	}
-
-	return "unknown"
-}
-
-func (kv KV) ParameterCount() uint64 {
-	return kv.u64("general.parameter_count")
-}
-
-func (kv KV) FileType() string {
-	if u64 := kv.u64("general.file_type"); u64 > 0 {
-		return fileType(uint32(u64))
-	}
-
-	return "unknown"
-}
-
-func (kv KV) BlockCount() uint64 {
-	return kv.u64(fmt.Sprintf("%s.block_count", kv.Architecture()))
-}
-
-func (kv KV) HeadCount() uint64 {
-	return kv.u64(fmt.Sprintf("%s.attention.head_count", kv.Architecture()))
-}
-
-func (kv KV) HeadCountKV() uint64 {
-	return kv.u64(fmt.Sprintf("%s.attention.head_count_kv", kv.Architecture()))
-}
-
-func (kv KV) GQA() uint64 {
-	if headCountKV := kv.HeadCountKV(); headCountKV > 0 {
-		return kv.HeadCount() / headCountKV
-	}
-
-	return 0
-}
-
-func (kv KV) EmbeddingLength() uint64 {
-	return kv.u64(fmt.Sprintf("%s.embedding_length", kv.Architecture()))
-}
-
-func (kv KV) ContextLength() uint64 {
-	return kv.u64(fmt.Sprintf("%s.context_length", kv.Architecture()))
-}
-
 type Tensor struct {
-	Name   string `json:"name"`
-	Kind   uint32 `json:"kind"`
-	Offset uint64 `json:"-"`
+	Name   string
+	Kind   uint32
+	Offset uint64
 
 	// Shape is the number of elements in each dimension
-	Shape []uint64 `json:"shape"`
+	Shape []uint64
 
-	io.WriterTo `json:"-"`
+	io.WriterTo
 }
 
 func (t Tensor) blockSize() uint64 {
@@ -265,16 +201,16 @@ const (
 
 var ErrUnsupportedFormat = errors.New("unsupported model format")
 
-func DecodeGGML(rs io.ReadSeeker) (*GGML, int64, error) {
+func DecodeGGML(rs io.ReadSeeker) (*GGML, error) {
 	var magic uint32
 	if err := binary.Read(rs, binary.LittleEndian, &magic); err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 
 	var c container
 	switch magic {
 	case FILE_MAGIC_GGML, FILE_MAGIC_GGMF, FILE_MAGIC_GGJT:
-		return nil, 0, ErrUnsupportedFormat
+		return nil, ErrUnsupportedFormat
 	case FILE_MAGIC_GGLA:
 		c = &containerGGLA{}
 	case FILE_MAGIC_GGUF_LE:
@@ -282,24 +218,25 @@ func DecodeGGML(rs io.ReadSeeker) (*GGML, int64, error) {
 	case FILE_MAGIC_GGUF_BE:
 		c = &containerGGUF{ByteOrder: binary.BigEndian}
 	default:
-		return nil, 0, errors.New("invalid file magic")
+		return nil, errors.New("invalid file magic")
 	}
 
 	model, err := c.Decode(rs)
 	if errors.Is(err, io.EOF) {
 		// noop
 	} else if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 
 	offset, err := rs.Seek(0, io.SeekCurrent)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 
 	// final model type
 	return &GGML{
 		container: c,
 		model:     model,
-	}, offset, nil
+		Size:      offset,
+	}, nil
 }
