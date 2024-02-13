@@ -33,14 +33,14 @@ type LlamaServer struct {
 	cmd     *exec.Cmd
 	done    chan error // Channel to signal when the process exits
 	status  *StatusWriter
-	options api.Options
+	options *api.Options
 }
 
 var cpuOnlyFamilies = []string{
 	"mamba",
 }
 
-func NewLlamaServer(model string, adapters, projectors []string, opts api.Options) (*LlamaServer, error) {
+func NewLlamaServer(model string, adapters, projectors []string, opts *api.Options) (*LlamaServer, error) {
 	if _, err := os.Stat(model); err != nil {
 		return nil, err
 	}
@@ -85,7 +85,7 @@ func NewLlamaServer(model string, adapters, projectors []string, opts api.Option
 	graph := int64(ggml.KV().GQA()) * kv / 6
 	usedMemory += graph
 
-	if usedMemory > availableMemory || slices.Contains(cpuOnlyFamilies, ggml.KV().Architecture()) {
+	if (usedMemory > availableMemory || slices.Contains(cpuOnlyFamilies, ggml.KV().Architecture())) && info.Library != "metal" {
 		info.Library = "cpu"
 	}
 
@@ -159,7 +159,7 @@ func NewLlamaServer(model string, adapters, projectors []string, opts api.Option
 		params = append(params, "--log-disable")
 	}
 
-	if opts.NumGPU > 0 {
+	if opts.NumGPU >= 0 {
 		params = append(params, "--n-gpu-layers", fmt.Sprintf("%d", opts.NumGPU))
 	}
 
