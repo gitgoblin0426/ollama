@@ -146,7 +146,7 @@ function compress {
     }
 
     write-host "Compressing dlls..."
-    $dlls = dir "${script:buildDir}/bin/*.dll"
+    $binaries = dir "${script:buildDir}/bin/*.dll"
     foreach ($file in $dlls) {
         & "$script:GZIP" --best -f $file
     }
