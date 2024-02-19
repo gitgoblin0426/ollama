@@ -14,7 +14,7 @@ go build .
 Then run the desktop app with `npm start`:
 
 ```
-cd macapp
+cd app
 npm install
 npm start
 ```
