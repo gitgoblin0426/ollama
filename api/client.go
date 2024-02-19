@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -300,7 +301,18 @@ func (c *Client) Embeddings(ctx context.Context, req *EmbeddingRequest) (*Embedd
 }
 
 func (c *Client) CreateBlob(ctx context.Context, digest string, r io.Reader) error {
-	return c.do(ctx, http.MethodPost, fmt.Sprintf("/api/blobs/%s", digest), r, nil)
+	if err := c.do(ctx, http.MethodHead, fmt.Sprintf("/api/blobs/%s", digest), nil, nil); err != nil {
+		var statusError StatusError
+		if !errors.As(err, &statusError) || statusError.StatusCode != http.StatusNotFound {
+			return err
+		}
+
+		if err := c.do(ctx, http.MethodPost, fmt.Sprintf("/api/blobs/%s", digest), r, nil); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (c *Client) Version(ctx context.Context) (string, error) {
