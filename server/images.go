@@ -322,7 +322,7 @@ func CreateModel(ctx context.Context, name, modelFileDir, quantization string, c
 
 			pathName := realpath(modelFileDir, c.Args)
 
-			ggufName, err := convertModel(name, pathName, fn)
+			ggufName, err := convertSafetensors(name, pathName, fn)
 			if err != nil {
 				var pathErr *fs.PathError
 				switch {
@@ -633,7 +633,7 @@ func CreateModel(ctx context.Context, name, modelFileDir, quantization string, c
 	return nil
 }
 
-func convertModel(name, path string, fn func(resp api.ProgressResponse)) (string, error) {
+func convertSafetensors(name, path string, fn func(resp api.ProgressResponse)) (string, error) {
 	r, err := zip.OpenReader(path)
 	if err != nil {
 		return "", err
@@ -668,22 +668,17 @@ func convertModel(name, path string, fn func(resp api.ProgressResponse)) (string
 		rc.Close()
 	}
 
-	mf, err := convert.GetModelFormat(tempDir)
+	params, err := convert.GetParams(tempDir)
 	if err != nil {
 		return "", err
 	}
 
-	params, err := mf.GetParams(tempDir)
+	mArch, err := convert.GetModelArchFromParams(name, tempDir, params)
 	if err != nil {
 		return "", err
 	}
 
-	mArch, err := mf.GetModelArch(name, tempDir, params)
-	if err != nil {
-		return "", err
-	}
-
-	fn(api.ProgressResponse{Status: "processing tensors"})
+	fn(api.ProgressResponse{Status: "processing safetensors"})
 	if err := mArch.GetTensors(); err != nil {
 		return "", err
 	}

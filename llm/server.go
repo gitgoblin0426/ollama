@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -33,6 +34,10 @@ type LlamaServer struct {
 	done    chan error // Channel to signal when the process exits
 	status  *StatusWriter
 	options api.Options
+}
+
+var cpuOnlyFamilies = []string{
+	"mamba",
 }
 
 func NewLlamaServer(model string, adapters, projectors []string, opts api.Options) (*LlamaServer, error) {
@@ -86,7 +91,7 @@ func NewLlamaServer(model string, adapters, projectors []string, opts api.Option
 	memoryRequiredPartial := memoryMinimum + graphPartialOffload
 
 	if info.Library != "metal" {
-		if memoryRequiredPartial > memoryAvailable {
+		if memoryRequiredPartial > memoryAvailable || slices.Contains(cpuOnlyFamilies, ggml.KV().Architecture()) {
 			info.Library = "cpu"
 		}
 	}
@@ -272,6 +277,12 @@ func NewLlamaServer(model string, adapters, projectors []string, opts api.Option
 			_ = s.cmd.Wait()
 		}()
 
+		if err = s.waitUntilRunning(); err != nil {
+			slog.Error("error starting llama server", "server", servers[i], "error", err)
+			s.Close()
+			finalErr = err
+			continue
+		}
 		return s, nil
 	}
 
@@ -372,7 +383,7 @@ func (s *LlamaServer) Ping(ctx context.Context) error {
 	return nil
 }
 
-func (s *LlamaServer) WaitUntilRunning() error {
+func (s *LlamaServer) waitUntilRunning() error {
 	start := time.Now()
 	// TODO we need to wire up a better way to detect hangs during model load and startup of the server
 	expiresAt := time.Now().Add(10 * time.Minute) // be generous with timeout, large models can take a while to load

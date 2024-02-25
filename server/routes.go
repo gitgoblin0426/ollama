@@ -68,18 +68,6 @@ var loaded struct {
 
 var defaultSessionDuration = 5 * time.Minute
 
-func unload() {
-	if loaded.llama != nil {
-		loaded.llama.Close()
-	}
-
-	loaded.llama = nil
-	loaded.model = ""
-	loaded.adapters = nil
-	loaded.projectors = nil
-	loaded.Options = nil
-}
-
 // load a model into memory if it is not already loaded, it is up to the caller to lock loaded.mu before calling this function
 func load(c *gin.Context, model *Model, opts api.Options, sessionDuration time.Duration) error {
 	ctx, cancel := context.WithTimeout(c, 10*time.Second)
@@ -95,7 +83,12 @@ func load(c *gin.Context, model *Model, opts api.Options, sessionDuration time.D
 	if needLoad {
 		if loaded.llama != nil {
 			slog.Info("changing loaded model")
-			unload()
+			loaded.llama.Close()
+			loaded.llama = nil
+			loaded.model = ""
+			loaded.adapters = nil
+			loaded.projectors = nil
+			loaded.Options = nil
 		}
 
 		llama, err := llm.NewLlamaServer(model.ModelPath, model.AdapterPaths, model.ProjectorPaths, opts)
@@ -115,19 +108,22 @@ func load(c *gin.Context, model *Model, opts api.Options, sessionDuration time.D
 		loaded.projectors = model.ProjectorPaths
 		loaded.llama = llama
 		loaded.Options = &opts
-
-		if err = llama.WaitUntilRunning(); err != nil {
-			slog.Error("error loading llama server", "error", err)
-			unload()
-			return err
-		}
 	}
 
 	if loaded.expireTimer == nil {
 		loaded.expireTimer = time.AfterFunc(sessionDuration, func() {
 			loaded.mu.Lock()
 			defer loaded.mu.Unlock()
-			unload()
+
+			if loaded.llama != nil {
+				loaded.llama.Close()
+			}
+
+			loaded.llama = nil
+			loaded.model = ""
+			loaded.adapters = nil
+			loaded.projectors = nil
+			loaded.Options = nil
 		})
 	}
 
@@ -1150,7 +1146,9 @@ func Serve(ln net.Listener) error {
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-signals
-		unload()
+		if loaded.llama != nil {
+			loaded.llama.Close()
+		}
 		gpu.Cleanup()
 		os.Exit(0)
 	}()

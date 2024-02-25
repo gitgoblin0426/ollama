@@ -65,14 +65,13 @@ func addOnes(data []float32, vectorSize int) ([]float32, error) {
 }
 
 func (m *GemmaModel) GetTensors() error {
-	t, err := m.Format.GetTensors(m.Path, m.Params)
+	t, err := GetSafeTensors(m.Path, m.Params)
 	if err != nil {
 		return err
 	}
 
-	slog.Debug(fmt.Sprintf("Total tensors: %d", len(t)))
-
 	m.Tensors = []llm.Tensor{}
+
 	for _, l := range t {
 		if strings.HasSuffix(l.Name, "norm.weight") {
 			wt := l.WriterTo.(safetensorWriterTo)
@@ -86,7 +85,7 @@ func (m *GemmaModel) GetTensors() error {
 }
 
 func (m *GemmaModel) LoadVocab() error {
-	v, err := LoadSentencePieceTokens(m.Path, m.Params)
+	v, err := LoadSentencePieceTokens(m.Path, m.Params.VocabSize)
 	if err != nil {
 		return err
 	}

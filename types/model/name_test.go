@@ -5,7 +5,6 @@ import (
 	"cmp"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -112,11 +111,11 @@ func TestNameConsecutiveDots(t *testing.T) {
 	for i := 1; i < 10; i++ {
 		s := strings.Repeat(".", i)
 		if i > 1 {
-			if g := ParseName(s, FillNothing).DisplayLong(); g != "" {
+			if g := ParseNameFill(s, "").String(); g != "" {
 				t.Errorf("ParseName(%q) = %q; want empty string", s, g)
 			}
 		} else {
-			if g := ParseName(s, FillNothing).DisplayLong(); g != s {
+			if g := ParseNameFill(s, "").String(); g != s {
 				t.Errorf("ParseName(%q) = %q; want %q", s, g, s)
 			}
 		}
@@ -125,7 +124,7 @@ func TestNameConsecutiveDots(t *testing.T) {
 
 func TestNameParts(t *testing.T) {
 	var p Name
-	if w, g := int(NumParts), len(p.parts); w != g {
+	if w, g := int(PartDigest+1), len(p.Parts()); w != g {
 		t.Errorf("Parts() = %d; want %d", g, w)
 	}
 }
@@ -149,69 +148,19 @@ func TestParseName(t *testing.T) {
 			s := prefix + baseName
 
 			t.Run(s, func(t *testing.T) {
-				name := ParseName(s, FillNothing)
+				name := ParseNameFill(s, "")
 				got := fieldsFromName(name)
 				if got != want {
 					t.Errorf("ParseName(%q) = %q; want %q", s, got, want)
 				}
 
 				// test round-trip
-				if !ParseName(name.DisplayLong(), FillNothing).EqualFold(name) {
-					t.Errorf("ParseName(%q).String() = %s; want %s", s, name.DisplayLong(), baseName)
+				if !ParseNameFill(name.String(), "").EqualFold(name) {
+					t.Errorf("ParseName(%q).String() = %s; want %s", s, name.String(), baseName)
 				}
 			})
 		}
 	}
-}
-
-func TestParseNameFill(t *testing.T) {
-	cases := []struct {
-		in   string
-		fill string
-		want string
-	}{
-		{"mistral", "example.com/library/?:latest+Q4_0", "example.com/library/mistral:latest+Q4_0"},
-		{"mistral", "example.com/library/?:latest", "example.com/library/mistral:latest"},
-		{"llama2:x", "example.com/library/?:latest+Q4_0", "example.com/library/llama2:x+Q4_0"},
-
-		// Invalid
-		{"", "example.com/library/?:latest+Q4_0", ""},
-		{"llama2:?", "example.com/library/?:latest+Q4_0", ""},
-	}
-
-	for _, tt := range cases {
-		t.Run(tt.in, func(t *testing.T) {
-			name := ParseName(tt.in, tt.fill)
-			if g := name.DisplayLong(); g != tt.want {
-				t.Errorf("ParseName(%q, %q) = %q; want %q", tt.in, tt.fill, g, tt.want)
-			}
-		})
-	}
-
-	t.Run("invalid fill", func(t *testing.T) {
-		defer func() {
-			if recover() == nil {
-				t.Fatal("expected panic")
-			}
-		}()
-		ParseName("x", "^")
-	})
-}
-
-func TestParseNameHTTPDoublePrefixStrip(t *testing.T) {
-	cases := []string{
-		"http://https://valid.com/valid/valid:latest",
-		"https://http://valid.com/valid/valid:latest",
-	}
-	for _, s := range cases {
-		t.Run(s, func(t *testing.T) {
-			name := ParseName(s, FillNothing)
-			if name.IsValid() {
-				t.Errorf("expected invalid path; got %#v", name)
-			}
-		})
-	}
-
 }
 
 func TestCompleteWithAndWithoutBuild(t *testing.T) {
@@ -230,7 +179,7 @@ func TestCompleteWithAndWithoutBuild(t *testing.T) {
 
 	for _, tt := range cases {
 		t.Run(tt.in, func(t *testing.T) {
-			p := ParseName(tt.in, FillNothing)
+			p := ParseNameFill(tt.in, "")
 			t.Logf("ParseName(%q) = %#v", tt.in, p)
 			if g := p.IsComplete(); g != tt.complete {
 				t.Errorf("Complete(%q) = %v; want %v", tt.in, g, tt.complete)
@@ -245,7 +194,7 @@ func TestCompleteWithAndWithoutBuild(t *testing.T) {
 	// inlined when used in Complete, preventing any allocations or
 	// escaping to the heap.
 	allocs := testing.AllocsPerRun(1000, func() {
-		keep(ParseName("complete.com/x/mistral:latest+Q4_0", FillNothing).IsComplete())
+		keep(ParseNameFill("complete.com/x/mistral:latest+Q4_0", "").IsComplete())
 	})
 	if allocs > 0 {
 		t.Errorf("Complete allocs = %v; want 0", allocs)
@@ -262,7 +211,7 @@ func TestNameLogValue(t *testing.T) {
 		t.Run(s, func(t *testing.T) {
 			var b bytes.Buffer
 			log := slog.New(slog.NewTextHandler(&b, nil))
-			name := ParseName(s, FillNothing)
+			name := ParseNameFill(s, "")
 			log.Info("", "name", name)
 			want := fmt.Sprintf("name=%s", name.GoString())
 			got := b.String()
@@ -309,7 +258,7 @@ func TestNameGoString(t *testing.T) {
 
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			p := ParseName(tt.in, FillNothing)
+			p := ParseNameFill(tt.in, "")
 			tt.wantGoString = cmp.Or(tt.wantGoString, tt.in)
 			if g := fmt.Sprintf("%#v", p); g != tt.wantGoString {
 				t.Errorf("GoString() = %q; want %q", g, tt.wantGoString)
@@ -337,14 +286,11 @@ func TestDisplayShortest(t *testing.T) {
 		{"example.com/library/mistral:Latest+Q4_0", "example.com/library/_:latest", "mistral", false},
 		{"example.com/library/mistral:Latest+q4_0", "example.com/library/_:latest", "mistral", false},
 
-		// zero value
-		{"", MaskDefault, "", true},
-
 		// invalid mask
 		{"example.com/library/mistral:latest+Q4_0", "example.com/mistral", "", true},
 
 		// DefaultMask
-		{"registry.ollama.ai/library/mistral:latest+Q4_0", MaskDefault, "mistral", false},
+		{"registry.ollama.ai/library/mistral:latest+Q4_0", DefaultMask, "mistral", false},
 
 		// Auto-Fill
 		{"x", "example.com/library/_:latest", "x", false},
@@ -363,7 +309,7 @@ func TestDisplayShortest(t *testing.T) {
 				}
 			}()
 
-			p := ParseName(tt.in, FillNothing)
+			p := ParseNameFill(tt.in, "")
 			t.Logf("ParseName(%q) = %#v", tt.in, p)
 			if g := p.DisplayShortest(tt.mask); g != tt.want {
 				t.Errorf("got = %q; want %q", g, tt.want)
@@ -374,7 +320,7 @@ func TestDisplayShortest(t *testing.T) {
 
 func TestParseNameAllocs(t *testing.T) {
 	allocs := testing.AllocsPerRun(1000, func() {
-		keep(ParseName("example.com/mistral:7b+Q4_0", FillNothing))
+		keep(ParseNameFill("example.com/mistral:7b+Q4_0", ""))
 	})
 	if allocs > 0 {
 		t.Errorf("ParseName allocs = %v; want 0", allocs)
@@ -385,24 +331,8 @@ func BenchmarkParseName(b *testing.B) {
 	b.ReportAllocs()
 
 	for range b.N {
-		keep(ParseName("example.com/mistral:7b+Q4_0", FillNothing))
+		keep(ParseNameFill("example.com/mistral:7b+Q4_0", ""))
 	}
-}
-
-func FuzzParseNameFromFilepath(f *testing.F) {
-	f.Add("example.com/library/mistral/7b/Q4_0")
-	f.Add("example.com/../mistral/7b/Q4_0")
-	f.Add("example.com/x/../7b/Q4_0")
-	f.Add("example.com/x/../7b")
-	f.Fuzz(func(t *testing.T, s string) {
-		name := ParseNameFromFilepath(s, FillNothing)
-		if strings.Contains(s, "..") && !name.IsZero() {
-			t.Fatalf("non-zero value for path with '..': %q", s)
-		}
-		if name.IsValid() == name.IsZero() {
-			t.Errorf("expected valid path to be non-zero value; got %#v", name)
-		}
-	})
 }
 
 func FuzzParseName(f *testing.F) {
@@ -416,7 +346,7 @@ func FuzzParseName(f *testing.F) {
 	f.Add(":@!@")
 	f.Add("...")
 	f.Fuzz(func(t *testing.T, s string) {
-		r0 := ParseName(s, FillNothing)
+		r0 := ParseNameFill(s, "")
 
 		if strings.Contains(s, "..") && !r0.IsZero() {
 			t.Fatalf("non-zero value for path with '..': %q", s)
@@ -429,203 +359,73 @@ func FuzzParseName(f *testing.F) {
 			t.Skipf("invalid path: %q", s)
 		}
 
-		for _, p := range r0.parts {
+		for _, p := range r0.Parts() {
 			if len(p) > MaxNamePartLen {
 				t.Errorf("part too long: %q", p)
 			}
 		}
 
-		if !strings.EqualFold(r0.DisplayLong(), s) {
-			t.Errorf("String() did not round-trip with case insensitivity: %q\ngot  = %q\nwant = %q", s, r0.DisplayLong(), s)
+		if !strings.EqualFold(r0.String(), s) {
+			t.Errorf("String() did not round-trip with case insensitivity: %q\ngot  = %q\nwant = %q", s, r0.String(), s)
 		}
 
-		r1 := ParseName(r0.DisplayLong(), FillNothing)
+		r1 := ParseNameFill(r0.String(), "")
 		if !r0.EqualFold(r1) {
 			t.Errorf("round-trip mismatch: %+v != %+v", r0, r1)
 		}
 	})
 }
 
+func TestFill(t *testing.T) {
+	cases := []struct {
+		dst  string
+		src  string
+		want string
+	}{
+		{"mistral", "o.com/library/PLACEHOLDER:latest+Q4_0", "o.com/library/mistral:latest+Q4_0"},
+		{"o.com/library/mistral", "PLACEHOLDER:latest+Q4_0", "o.com/library/mistral:latest+Q4_0"},
+		{"", "o.com/library/mistral:latest+Q4_0", "o.com/library/mistral:latest+Q4_0"},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.dst, func(t *testing.T) {
+			r := Fill(ParseNameFill(tt.dst, ""), ParseNameFill(tt.src, ""))
+			if r.String() != tt.want {
+				t.Errorf("Fill(%q, %q) = %q; want %q", tt.dst, tt.src, r, tt.want)
+			}
+		})
+	}
+}
+
 func TestNameStringAllocs(t *testing.T) {
-	name := ParseName("example.com/ns/mistral:latest+Q4_0", FillNothing)
+	name := ParseNameFill("example.com/ns/mistral:latest+Q4_0", "")
 	allocs := testing.AllocsPerRun(1000, func() {
-		keep(name.DisplayLong())
+		keep(name.String())
 	})
 	if allocs > 1 {
 		t.Errorf("String allocs = %v; want 0", allocs)
 	}
 }
 
-func TestNamePath(t *testing.T) {
-	cases := []struct {
-		in   string
-		want string
-	}{
-		{"example.com/library/mistral:latest+Q4_0", "example.com/library/mistral:latest"},
+func ExampleFill() {
+	defaults := ParseNameFill("registry.ollama.com/library/PLACEHOLDER:latest+Q4_0", "")
+	r := Fill(ParseNameFill("mistral", ""), defaults)
+	fmt.Println(r)
 
-		// incomplete
-		{"example.com/library/mistral:latest", "example.com/library/mistral:latest"},
-		{"", ""},
-	}
-	for _, tt := range cases {
-		t.Run(tt.in, func(t *testing.T) {
-			p := ParseName(tt.in, FillNothing)
-			t.Logf("ParseName(%q) = %#v", tt.in, p)
-			if g := p.URLPath(); g != tt.want {
-				t.Errorf("got = %q; want %q", g, tt.want)
-			}
-		})
-	}
-}
-
-func TestNameFromFilepath(t *testing.T) {
-	cases := []struct {
-		in   string
-		want string
-	}{
-		{
-			in:   "example.com/library/mistral:latest+Q4_0",
-			want: "example.com/library/mistral/latest/Q4_0",
-		},
-		{
-			in:   "Example.Com/Library/Mistral:Latest+Q4_0",
-			want: "example.com/library/mistral/latest/Q4_0",
-		},
-		{
-			in:   "Example.Com/Library/Mistral:Latest+Q4_0",
-			want: "example.com/library/mistral/latest/Q4_0",
-		},
-		{
-			in:   "example.com/library/mistral:latest",
-			want: "example.com/library/mistral/latest",
-		},
-		{
-			in:   "",
-			want: "",
-		},
-	}
-	for _, tt := range cases {
-		t.Run(tt.in, func(t *testing.T) {
-			p := ParseName(tt.in, FillNothing)
-			t.Logf("ParseName(%q) = %#v", tt.in, p)
-			g := p.Filepath()
-			g = filepath.ToSlash(g)
-			if g != tt.want {
-				t.Errorf("got = %q; want %q", g, tt.want)
-			}
-		})
-	}
-}
-
-func TestParseNameFilepath(t *testing.T) {
-	cases := []struct {
-		in   string
-		fill string // default is FillNothing
-		want string
-	}{
-		{
-			in:   "example.com/library/mistral/latest/Q4_0",
-			want: "example.com/library/mistral:latest+Q4_0",
-		},
-		{
-			in:   "example.com/library/mistral/latest",
-			fill: "?/?/?:latest+Q4_0",
-			want: "example.com/library/mistral:latest+Q4_0",
-		},
-		{
-			in:   "example.com/library/mistral",
-			fill: "?/?/?:latest+Q4_0",
-			want: "example.com/library/mistral:latest+Q4_0",
-		},
-		{
-			in:   "example.com/library",
-			want: "",
-		},
-		{
-			in:   "example.com/",
-			want: "",
-		},
-		{
-			in:   "example.com/^/mistral/latest/Q4_0",
-			want: "",
-		},
-		{
-			in:   "example.com/library/mistral/../Q4_0",
-			want: "",
-		},
-		{
-			in:   "example.com/library/mistral/latest/Q4_0/extra",
-			want: "",
-		},
-	}
-	for _, tt := range cases {
-		t.Run(tt.in, func(t *testing.T) {
-			in := strings.ReplaceAll(tt.in, "/", string(filepath.Separator))
-			fill := cmp.Or(tt.fill, FillNothing)
-			want := ParseName(tt.want, fill)
-			if g := ParseNameFromFilepath(in, fill); !g.EqualFold(want) {
-				t.Errorf("got = %q; want %q", g.DisplayLong(), tt.want)
-			}
-		})
-	}
-}
-
-func TestParseNameFromPath(t *testing.T) {
-	cases := []struct {
-		in   string
-		want string
-		fill string // default is FillNothing
-	}{
-		{
-			in:   "example.com/library/mistral:latest+Q4_0",
-			want: "example.com/library/mistral:latest+Q4_0",
-		},
-		{
-			in:   "/example.com/library/mistral:latest+Q4_0",
-			want: "example.com/library/mistral:latest+Q4_0",
-		},
-		{
-			in:   "/example.com/library/mistral",
-			want: "example.com/library/mistral",
-		},
-		{
-			in:   "/example.com/library/mistral",
-			fill: "?/?/?:latest+Q4_0",
-			want: "example.com/library/mistral:latest+Q4_0",
-		},
-		{
-			in:   "/example.com/library",
-			want: "",
-		},
-		{
-			in:   "/example.com/",
-			want: "",
-		},
-		{
-			in:   "/example.com/^/mistral/latest",
-			want: "",
-		},
-	}
-	for _, tt := range cases {
-		t.Run(tt.in, func(t *testing.T) {
-			fill := cmp.Or(tt.fill, FillNothing)
-			if g := ParseNameFromURLPath(tt.in, fill); g.DisplayLong() != tt.want {
-				t.Errorf("got = %q; want %q", g.DisplayLong(), tt.want)
-			}
-		})
-	}
+	// Output:
+	// registry.ollama.com/library/mistral:latest+Q4_0
 }
 
 func ExampleName_MapHash() {
 	m := map[uint64]bool{}
 
 	// key 1
-	m[ParseName("mistral:latest+q4", FillNothing).MapHash()] = true
-	m[ParseName("miSTRal:latest+Q4", FillNothing).MapHash()] = true
-	m[ParseName("mistral:LATest+Q4", FillNothing).MapHash()] = true
+	m[ParseNameFill("mistral:latest+q4", "").MapHash()] = true
+	m[ParseNameFill("miSTRal:latest+Q4", "").MapHash()] = true
+	m[ParseNameFill("mistral:LATest+Q4", "").MapHash()] = true
 
 	// key 2
-	m[ParseName("mistral:LATest", FillNothing).MapHash()] = true
+	m[ParseNameFill("mistral:LATest", "").MapHash()] = true
 
 	fmt.Println(len(m))
 	// Output:
@@ -634,15 +434,15 @@ func ExampleName_MapHash() {
 
 func ExampleName_CompareFold_sort() {
 	names := []Name{
-		ParseName("mistral:latest", FillNothing),
-		ParseName("mistRal:7b+q4", FillNothing),
-		ParseName("MIstral:7b", FillNothing),
+		ParseNameFill("mistral:latest", ""),
+		ParseNameFill("mistRal:7b+q4", ""),
+		ParseNameFill("MIstral:7b", ""),
 	}
 
 	slices.SortFunc(names, Name.CompareFold)
 
 	for _, n := range names {
-		fmt.Println(n.DisplayLong())
+		fmt.Println(n)
 	}
 
 	// Output:
@@ -657,7 +457,7 @@ func ExampleName_completeAndResolved() {
 		"x/y/z:latest+q4_0",
 		"@sha123-1",
 	} {
-		name := ParseName(s, FillNothing)
+		name := ParseNameFill(s, "")
 		fmt.Printf("complete:%v resolved:%v  digest:%s\n", name.IsComplete(), name.IsResolved(), name.Digest())
 	}
 
@@ -668,7 +468,7 @@ func ExampleName_completeAndResolved() {
 }
 
 func ExampleName_DisplayShortest() {
-	name := ParseName("example.com/jmorganca/mistral:latest+Q4_0", FillNothing)
+	name := ParseNameFill("example.com/jmorganca/mistral:latest+Q4_0", "")
 
 	fmt.Println(name.DisplayShortest("example.com/jmorganca/_:latest"))
 	fmt.Println(name.DisplayShortest("example.com/_/_:latest"))
@@ -676,7 +476,7 @@ func ExampleName_DisplayShortest() {
 	fmt.Println(name.DisplayShortest("_/_/_:_"))
 
 	// Default
-	name = ParseName("registry.ollama.ai/library/mistral:latest+Q4_0", FillNothing)
+	name = ParseNameFill("registry.ollama.ai/library/mistral:latest+Q4_0", "")
 	fmt.Println(name.DisplayShortest(""))
 
 	// Output:
