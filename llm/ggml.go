@@ -164,8 +164,7 @@ func (ts Tensors) Layers() map[string]Layer {
 	for _, t := range ts {
 		parts := strings.Split(t.Name, ".")
 		if parts[0] == "blk" {
-			// join first and second part, e.g. blk.%d
-			parts = append([]string{fmt.Sprintf("%s.%s", parts[0], parts[1])}, parts[2:]...)
+			parts = parts[1:]
 		}
 
 		if _, ok := layers[parts[0]]; !ok {
