@@ -112,6 +112,7 @@ func NewLlamaServer(model string, adapters, projectors []string, opts api.Option
 	var memoryLayerOutput uint64
 	for k, v := range layers {
 		if !strings.HasPrefix(k, "blk.") {
+			slog.Info("aaa", "name", k, "size", format.HumanBytes2(v.size()))
 			memoryLayerOutput += v.size()
 		}
 	}
