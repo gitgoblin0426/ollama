@@ -1,7 +1,6 @@
 package model
 
 import (
-	"fmt"
 	"log/slog"
 	"strings"
 	"unicode"
@@ -48,11 +47,8 @@ var (
 // Digest.
 func ParseDigest(s string) Digest {
 	typ, digest, ok := strings.Cut(s, "-")
-	if !ok {
-		typ, digest, ok = strings.Cut(s, ":")
-	}
 	if ok && isValidDigestType(typ) && isValidHex(digest) {
-		return Digest{s: fmt.Sprintf("%s-%s", typ, digest)}
+		return Digest{s: s}
 	}
 	return Digest{}
 }
