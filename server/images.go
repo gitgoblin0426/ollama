@@ -29,7 +29,6 @@ import (
 	"github.com/ollama/ollama/format"
 	"github.com/ollama/ollama/llm"
 	"github.com/ollama/ollama/parser"
-	"github.com/ollama/ollama/types/model"
 	"github.com/ollama/ollama/version"
 )
 
@@ -702,32 +701,36 @@ func convertModel(name, path string, fn func(resp api.ProgressResponse)) (string
 	return path, nil
 }
 
-func CopyModel(src, dst model.Name) error {
-	manifests, err := GetManifestPath()
+func CopyModel(src, dest string) error {
+	srcModelPath := ParseModelPath(src)
+	srcPath, err := srcModelPath.GetManifestPath()
 	if err != nil {
 		return err
 	}
 
-	dstpath := filepath.Join(manifests, dst.FilepathNoBuild())
-	if err := os.MkdirAll(filepath.Dir(dstpath), 0o755); err != nil {
-		return err
-	}
-
-	srcpath := filepath.Join(manifests, src.FilepathNoBuild())
-	srcfile, err := os.Open(srcpath)
+	destModelPath := ParseModelPath(dest)
+	destPath, err := destModelPath.GetManifestPath()
 	if err != nil {
 		return err
 	}
-	defer srcfile.Close()
-
-	dstfile, err := os.Create(dstpath)
-	if err != nil {
+	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
 		return err
 	}
-	defer dstfile.Close()
 
-	_, err = io.Copy(dstfile, srcfile)
-	return err
+	// copy the file
+	input, err := os.ReadFile(srcPath)
+	if err != nil {
+		fmt.Println("Error reading file:", err)
+		return err
+	}
+
+	err = os.WriteFile(destPath, input, 0o644)
+	if err != nil {
+		fmt.Println("Error reading file:", err)
+		return err
+	}
+
+	return nil
 }
 
 func deleteUnusedLayers(skipModelPath *ModelPath, deleteMap map[string]struct{}, dryRun bool) error {
