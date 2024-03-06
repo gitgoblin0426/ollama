@@ -46,7 +46,6 @@ type Scheduler struct {
 // TODO set this to zero after a release or two, to enable multiple models by default
 var loadedMax = 1          // Maximum runners; < 1 maps to as many as will fit in VRAM (unlimited for CPU runners)
 var maxQueuedRequests = 10 // TODO configurable
-var numParallel = 1
 
 func InitScheduler(ctx context.Context) *Scheduler {
 	maxRunners := os.Getenv("OLLAMA_MAX_LOADED_MODELS")
@@ -56,14 +55,6 @@ func InitScheduler(ctx context.Context) *Scheduler {
 			slog.Error("invalid setting", "OLLAMA_MAX_LOADED_MODELS", maxRunners, "error", err)
 		} else {
 			loadedMax = m
-		}
-	}
-	if onp := os.Getenv("OLLAMA_NUM_PARALLEL"); onp != "" {
-		p, err := strconv.Atoi(onp)
-		if err != nil || p <= 0 {
-			slog.Error("invalid parallel setting, must be greater than zero", "OLLAMA_NUM_PARALLEL", onp, "error", err)
-		} else {
-			numParallel = p
 		}
 	}
 
@@ -90,8 +81,6 @@ func (s *Scheduler) GetRunner(c context.Context, model *Model, opts api.Options,
 		successCh:       make(chan *runnerRef),
 		errCh:           make(chan error, 1),
 	}
-	// context split across parallel threads
-	opts.NumCtx = opts.NumCtx * numParallel
 	select {
 	case s.pendingReqCh <- req:
 	default:
